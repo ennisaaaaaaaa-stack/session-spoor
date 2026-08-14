@@ -28,7 +28,7 @@ ROOT = Path(os.environ.get("STIGMERGY_ROOT", str(Path.home() / "Stigmergy")))
 SCRATCH = ROOT / "scratch"
 LEDGER = ROOT / "ledger.jsonl"
 
-MARKS = {"判断", "数据", "坑", "待审"}
+MARKS = {"判断", "数据", "坑", "待审·自", "待审·人"}
 MAX_SPACE_BYTES = 64 * 1024 * 1024  # 单空间64MB，超限报错不淘汰
 
 SCRATCH.mkdir(parents=True, exist_ok=True)
@@ -87,8 +87,8 @@ def _space_size(space: Path) -> int:
 def _bundle_md(space: Path, files: list[Path]) -> str:
     """Markdown bundle：mark过的在前（判断优先于数据），数据在后。"""
     out = [f"# Export from scratch space: {space.name}", ""]
-    # 排序键：判断 < 待审 < 坑 < 数据 < 未标记（判断永远最前，未标记垫底）
-    RANK = {"判断": 0, "待审": 1, "坑": 2, "数据": 3}
+    # 排序键：判断 < 待审·自 < 待审·人 < 坑 < 数据（认知在前，人审路由明确）
+    RANK = {"判断": 0, "待审·自": 1, "待审·人": 2, "坑": 3, "数据": 4}
     ranked = []
     for f in files:
         m = _load_marks(space, f.relative_to(space))
@@ -183,7 +183,7 @@ def scratchpad_list(space_id: str, path: str = "") -> str:
 
 @mcp.tool()
 def scratchpad_mark(space_id: str, path: str, mark: str) -> str:
-    """给文件打标记。词汇表：判断 / 数据 / 坑 / 待审。
+    """给文件打标记。词汇表：判断 / 数据 / 坑 / 待审·自 / 待审·人（两个法官要分开：自=主agent消化，人=人类拍板）
     分身执行中给自己留的判断用 mark 标，回流压缩器优先读 mark 过的。"""
     if mark not in MARKS:
         return json.dumps({"ok": False, "error": f"mark must be one of {sorted(MARKS)}"})

@@ -23,7 +23,7 @@ ROOT = Path(os.environ.get("STIGMERGY_ROOT", str(Path.home() / "Stigmergy")))
 WB = ROOT / "workbench"
 INDEX = WB / "INDEX.md"
 
-MARKS = {"判断", "数据", "坑", "待审"}
+MARKS = {"判断", "数据", "坑", "待审·自", "待审·人"}
 
 WB.mkdir(parents=True, exist_ok=True)
 
@@ -114,7 +114,7 @@ def workbench_journal(project: str, entry: str, mark: str = "判断") -> str:
     """追加一条工作记录（自动时间戳）。
 
     Args:
-        mark: 判断 / 数据 / 坑 / 待审
+        mark: 判断 / 数据 / 坑 / 待审·自 / 待审·人
     """
     if mark not in MARKS:
         return json.dumps({"ok": False, "error": f"mark must be one of {sorted(MARKS)}"})
