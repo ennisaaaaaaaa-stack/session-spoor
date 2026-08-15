@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-Stigmergy MCP — 迹廊
-工作台(workbench) MCP server v0.1
+session-spoor MCP — 猎迹
+工作台(workbench) MCP server v0.2
+
+
+Dying Will (dependency declaration — forces one ppid thought at write time):
+  Who launched me: the gateway, as its stdio child process (Hermes config, mcp section).
+  What happens if you kill me: the gateway's stdio channel breaks; MCP calls hang.
+  Nobody revives me — only a gateway restart brings me back. Always check ppid before kill.
+  Patch activation: code changes require a gateway restart (patch-on-disk != running process).
 
 主agent的常驻过程层：项目索引/状态桌面/记录条/复用件架。
 联邦式：与涂鸦房共享mark词汇表与接口语义，存储独立。

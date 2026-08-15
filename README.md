@@ -1,4 +1,4 @@
-# session-spoor · 迹廊
+# session-spoor · 猎迹
 
 **Every session leaves a trail.**
 
@@ -39,4 +39,4 @@ spoor /spʊər/ — 猎人追踪用的词：动物走过的路留下的足迹。
 
 ---
 
-MIT · 迹廊（中文）· 灵感来自stigmergy——白蚁没有蓝图，塔自己会站着。
+MIT · 猎迹（中文）· 灵感来自stigmergy——白蚁没有蓝图，塔自己会站着。
