@@ -25,6 +25,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 import spoor_common
+import spoor_search
 
 mcp = FastMCP("stigmergy-workbench")
 
@@ -194,6 +195,39 @@ def workbench_complete(project: str, note: str = "") -> str:
     _index_write()
     _ledger({"event": "wb_complete", "project": project, "note": note})
     return json.dumps({"ok": True, "project": project, "note": "done — awaiting digestion cron"})
+
+
+@mcp.tool()
+def workbench_search(query: str, type: str = "", project: str = "", agent: str = "", limit: int = 20) -> str:
+    """全文检索猎迹内容（FTS5）。搜索 journal/snippet/design/status/scratch。
+
+    Args:
+        query: 检索词。支持词、\"短语引号\"、OR/AND/NEAR。中文按字切分，连续短语用引号包住。
+        type: 过滤——journal:坑 / journal:判断 / snippet / design / status / description / scratch
+        project: 只搜该项目
+        agent: 只搜该住户（具名模式盖过戳的行）
+        limit: 最多返回几条
+    """
+    try:
+        rows = spoor_search.search(query, type=type, project=project, agent=agent, limit=limit)
+    except Exception as e:
+        import sqlite3
+        if isinstance(e, sqlite3.OperationalError):
+            return json.dumps({"ok": False, "error": f"bad query syntax: {e}", "hint": 'phrase → "文件锁"  OR → 词1 OR 词2'})
+        raise
+    if not rows:
+        return "(no hits)"
+    return "\n".join(
+        f"[{r['type']}{'|' + r['agent'] if r['agent'] else ''}] {r['path'].split('workbench/')[-1]}\n  {r['fragment']}"
+        for r in rows
+    )
+
+
+@mcp.tool()
+def workbench_reindex() -> str:
+    """全量重建检索索引。schema 变更或怀疑索引脏时用。日常搜索自动增量，无需手动调。"""
+    r = spoor_search.update_index(force=True)
+    return json.dumps(r, ensure_ascii=False)
 
 
 # 统一错误契约：包装所有已注册工具

@@ -147,7 +147,7 @@ async def workbench_suite():
         async with ClientSession(r, w) as s:
             await s.initialize()
             lt = await s.list_tools()
-            check("workbench tools listed", len(lt.tools) == 7, [t.name for t in lt.tools])
+            check("workbench tools listed", len(lt.tools) == 9, [t.name for t in lt.tools])
 
             n1 = json.loads(await call(s, "workbench_new", project="stigmergy", description="agent过程管理系统"))
             check("new ok", n1.get("ok"), n1)
