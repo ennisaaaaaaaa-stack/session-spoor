@@ -181,6 +181,21 @@ async def workbench_suite():
             rjm = await call(s, "workbench_read_journal", project="stigmergy", mark="坑", limit=2)
             check("limit takes newest", "FTS trigger" in rjm and "旧坑0" not in rjm, rjm[:200])
 
+            # ---- v0.3.1 FTS降级：短query/空query + 过滤维度 ≠ 空手而归 ----
+            # trigram最小粒度3：query="坑"(1字)原本永远no hits——开工先读坑仪式直接失效
+            sr1 = await call(s, "workbench_search", query="坑", type="journal:坑")
+            check("[v0.3.1] single-char query + type filter degrades to filtered list",
+                  "FTS trigger" in sr1 and "旧坑" in sr1 and "(no hits)" not in sr1, sr1[:200])
+            sr2 = await call(s, "workbench_search", query="", type="journal:坑")
+            check("[v0.3.1] empty query + type filter lists all 坑",
+                  "FTS trigger" in sr2 and "旧坑" in sr2, sr2[:200])
+            sr3 = await call(s, "workbench_search", query="", type="", project="", agent="")
+            check("[v0.3.1] no query no filter → clean empty, no crash",
+                  sr3 == "(no hits)", sr3[:100])
+            # path显示走Path语义（Windows \分隔符下split('workbench/')失效）
+            check("[v0.3.1] search result path is relative (Path semantics)",
+                  "stigmergy/journal/" in sr1, sr1[:120])
+
             sn = json.loads(await call(s, "workbench_snippet", project="stigmergy", name="utils/fix.py", content="print('hi')"))
             check("snippet save nested", sn.get("ok"), sn)
             got = await call(s, "workbench_snippet", project="stigmergy", name="utils/fix.py")
@@ -199,8 +214,39 @@ async def workbench_suite():
             idx2 = Path(ROOT, "workbench/INDEX.md").read_text(encoding="utf-8")
             check("INDEX.md after complete", "✅完成" in idx2, idx2[:150])
 
+async def windows_sim_suite():
+    """Windows模拟（照照round-4方法）：sys.modules['fcntl']=None 拦截fcntl，
+    两个server必须仍能启动握手——v0.3顶层 import fcntl 在Windows上import即死。"""
+    shim = Path(ROOT, "_win_sim_launch.py")
+    shim.write_text(
+        "import sys, os, runpy\n"
+        "sys.modules['fcntl'] = None  # simulate Windows: import fcntl -> ImportError\n"
+        "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[1])))  # run_path不加脚本目录\n"
+        "runpy.run_path(sys.argv[1], run_name='__main__')\n",
+        encoding="utf-8")
+    params = StdioServerParameters(
+        command=VENV_PY, args=[str(shim), WORKBENCH_SERVER],
+        env={"STIGMERGY_ROOT": ROOT, "PATH": "/usr/bin:/bin"},
+    )
+    async with stdio_client(params) as (r, w):
+        async with ClientSession(r, w) as s:
+            await s.initialize()
+            lt = await s.list_tools()
+            check("[v0.3.1][win-sim] workbench server starts without fcntl",
+                  len(lt.tools) == 9, str([t.name for t in lt.tools]))
+            # journal写入走 _with_lock 退化路径（fcntl=None → 裸写）必须成功
+            wj = json.loads(await call(s, "workbench_journal", project="stigmergy",
+                                       entry="Windows模拟下锁层退化裸写成功", mark="数据"))
+            check("[v0.3.1][win-sim] journal write via degraded lock path", wj.get("ok"), wj)
+            ws = await call(s, "workbench_search", query="", type="journal:数据")
+            # 断言验"过滤查询返回行"：snippet窗口24字会被时间戳前缀占满，不能断言正文可见
+            check("[v0.3.1][win-sim] FTS filter-only query works",
+                  "[journal:数据]" in ws and "stigmergy/journal/" in ws and "(no hits)" not in ws, ws[:150])
+
+
 async def main():
-    for name, suite in [("scratch", scratch_suite), ("workbench", workbench_suite)]:
+    for name, suite in [("scratch", scratch_suite), ("workbench", workbench_suite),
+                        ("win-sim", windows_sim_suite)]:
         try:
             await suite()
         except Exception as e:
