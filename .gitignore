@@ -3,5 +3,6 @@ __pycache__/
 *.pyc
 patches/
 ledger.jsonl
+.locks/
 scratch/
 exports/
