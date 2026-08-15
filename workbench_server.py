@@ -30,6 +30,15 @@ WB.mkdir(parents=True, exist_ok=True)
 
 # ---------- 内部 ----------
 
+
+LEDGER = ROOT / "ledger.jsonl"
+
+def _ledger(event: dict) -> None:
+    import time as _t
+    event["ts"] = _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime())
+    with open(LEDGER, "a", encoding="utf-8") as f:
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M")
 
@@ -68,7 +77,7 @@ def _index_write() -> None:
     lines = ["# 迹廊 · 项目索引", "", "| 项目 | 说明 | 状态 | 最近 |", "|---|---|---|---|"]
     for r in rows:
         status = "✅完成" if r["done"] else "🔨进行中"
-        lines.append(f"| {r['project']} | {r['desc'] or '-'} | {status} | {r['touched']} |")
+        lines.append(f"| {r['project']} | {(r['desc'] or '-').replace(chr(124), chr(124)*2)} | {status} | {r['touched']} |")
     lines += ["", f"_自动维护 · {_now()}_"]
     INDEX.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -94,6 +103,7 @@ def workbench_new(project: str, description: str = "") -> str:
     (p / "description.md").write_text(description + "\n", encoding="utf-8")
     (p / "STATUS.md").write_text("# STATUS\n\n刚创建，还没开工。\n", encoding="utf-8")
     _index_write()
+    _ledger({"event": "wb_new", "project": project, "desc": description})
     return json.dumps({"ok": True, "project": project, "dir": str(p)})
 
 @mcp.tool()
@@ -137,14 +147,19 @@ def workbench_read_journal(project: str, mark: str = "", limit: int = 30) -> str
     开工仪式：新session接手项目先读 mark=坑 的。"""
     p = _proj(project)
     entries = []
-    for jf in sorted((p / "journal").glob("*.md"), reverse=True):
+    # 按文件名（日期）升序遍历，entries 全局按时间排——[-limit:] 取最新
+    # (照照 review: 旧版 reverse=True + [-limit:] 方向打架，limit 截掉的是最新记录)
+    for jf in sorted((p / "journal").glob("*.md")):
         for ln in jf.read_text(encoding="utf-8").splitlines():
             if ln.startswith("- **["):
                 entries.append((jf.stem, ln))
     if mark:
         if mark not in MARKS:
             return json.dumps({"ok": False, "error": f"mark must be one of {sorted(MARKS)} or empty"})
-        entries = [(d, ln) for d, ln in entries if f"[{mark}]" in ln]
+        # 精确匹配行首固定格式，不做子串匹配
+        # (照照 review: 旧版 in 匹配，正文里出现"[坑]"字样的判断条会被误捞)
+        prefix = f"- **[{mark}]**"
+        entries = [(d, ln) for d, ln in entries if ln.startswith(prefix)]
     entries = entries[-limit:]
     return "\n".join(f"{d} | {ln}" for d, ln in entries) if entries else "(empty)"
 
@@ -175,8 +190,23 @@ def workbench_complete(project: str, note: str = "") -> str:
     p = _proj(project)
     (p / "DONE").write_text(f"completed {_now()} {note}".strip() + "\n", encoding="utf-8")
     _index_write()
+    _ledger({"event": "wb_complete", "project": project, "note": note})
     return json.dumps({"ok": True, "project": project, "note": "done — awaiting digestion cron"})
 
+
+# 统一错误契约：包装所有已注册工具
+def _json_safe(fn):
+    import functools
+    @functools.wraps(fn)
+    def wrapper(*a, **k):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            return json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"})
+    return wrapper
+
+for _name in list(mcp.tools.keys()):
+    mcp.tools[_name] = _json_safe(mcp.tools[_name])
 
 if __name__ == "__main__":
     mcp.run()

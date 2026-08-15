@@ -107,6 +107,18 @@ def _bundle_md(space: Path, files: list[Path]) -> str:
     return "\n".join(out)
 
 
+
+def _json_safe(fn):
+    """错误契约统一：所有工具异常转JSON，编排层（程序）做解析不会炸。"""
+    import functools
+    @functools.wraps(fn)
+    def wrapper(*a, **k):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            return json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"})
+    return wrapper
+
 # ---------- MCP 工具 ----------
 
 @mcp.tool()
@@ -119,11 +131,11 @@ def scratchpad_create(task_id: str, label: str = "") -> str:
     Returns:
         space_id（JSON字符串，含 space_id/scratch_dir）
     """
-    task_id = "".join(c for c in task_id if c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" )
-    space_id = f"{task_id}-{uuid.uuid4().hex[:8]}"
+    safe_id = "".join(c for c in task_id if c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" ) or "task"
+    space_id = f"{safe_id}-{uuid.uuid4().hex[:8]}"
     sp = SCRATCH / space_id
     sp.mkdir(parents=True)
-    _ledger({"event": "create", "space": space_id, "task": task_id, "label": label})
+    _ledger({"event": "create", "space": space_id, "task": task_id, "safe_id": safe_id, "label": label})
     return json.dumps({"space_id": space_id, "scratch_dir": str(sp)}, ensure_ascii=False)
 
 
@@ -214,6 +226,16 @@ def scratchpad_export(space_id: str, selection: str, dest: str) -> str:
         for f in files:
             if not f.exists():
                 return json.dumps({"ok": False, "error": f"not found: {f}"})
+    # dest校验先行——即使nothing new也不允许探测任意路径
+    dest_p = Path(dest)
+    if not dest_p.is_absolute():
+        dest_p = ROOT / dest_p
+    else:
+        # 安全边界：dest强制落在ROOT下（照照review: 绝对路径可写任意位置）
+        try:
+            dest_p.resolve().relative_to(ROOT.resolve())
+        except ValueError:
+            return json.dumps({"ok": False, "error": f"dest must stay under {ROOT}"})
     # 过滤已导出的
     fresh = []
     for f in files:
@@ -222,9 +244,6 @@ def scratchpad_export(space_id: str, selection: str, dest: str) -> str:
             fresh.append(f)
     if not fresh:
         return json.dumps({"ok": True, "exported": 0, "note": "nothing new (all already exported)"})
-    dest_p = Path(dest)
-    if not dest_p.is_absolute():
-        dest_p = ROOT / dest_p
     dest_p.parent.mkdir(parents=True, exist_ok=True)
     bundle = _bundle_md(space, fresh)
     dest_p.write_text(bundle, encoding="utf-8")
@@ -291,6 +310,10 @@ def scratchpad_cleanup(space_id: str, mode: str = "export_marked", dest: str = "
              "exported": exported, "final_stats": stats})
     return json.dumps({"ok": True, "space": space_id, "mode": mode, "exported": exported})
 
+
+# 统一错误契约：包装所有已注册工具
+for _name in list(mcp.tools.keys()):
+    mcp.tools[_name] = _json_safe(mcp.tools[_name])
 
 if __name__ == "__main__":
     mcp.run()
