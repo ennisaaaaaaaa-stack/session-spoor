@@ -2,3 +2,6 @@ workbench/
 __pycache__/
 *.pyc
 patches/
+ledger.jsonl
+scratch/
+exports/
