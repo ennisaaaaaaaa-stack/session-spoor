@@ -1,1 +1,4 @@
 workbench/
+__pycache__/
+*.pyc
+patches/
