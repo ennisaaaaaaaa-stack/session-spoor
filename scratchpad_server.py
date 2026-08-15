@@ -29,6 +29,8 @@ from pathlib import Path
 # FastMCP
 from mcp.server.fastmcp import FastMCP
 
+import spoor_common
+
 mcp = FastMCP("stigmergy-scratchpad")
 
 ROOT = Path(os.environ.get("STIGMERGY_ROOT", str(Path.home() / "Stigmergy")))
@@ -44,9 +46,7 @@ SCRATCH.mkdir(parents=True, exist_ok=True)
 # ---------- 内部 ----------
 
 def _ledger(event: dict) -> None:
-    event["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
-    with open(LEDGER, "a", encoding="utf-8") as f:
-        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    spoor_common.append_ledger(event)
 
 
 def _space_path(space_id: str) -> Path:

@@ -24,6 +24,8 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+import spoor_common
+
 mcp = FastMCP("stigmergy-workbench")
 
 ROOT = Path(os.environ.get("STIGMERGY_ROOT", str(Path.home() / "Stigmergy")))
@@ -41,10 +43,7 @@ WB.mkdir(parents=True, exist_ok=True)
 LEDGER = ROOT / "ledger.jsonl"
 
 def _ledger(event: dict) -> None:
-    import time as _t
-    event["ts"] = _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime())
-    with open(LEDGER, "a", encoding="utf-8") as f:
-        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    spoor_common.append_ledger(event)
 
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M")
@@ -139,15 +138,10 @@ def workbench_journal(project: str, entry: str, mark: str = "判断") -> str:
     p = _proj(project)
     day = time.strftime("%Y-%m-%d")
     jf = p / "journal" / f"{day}.md"
-    line = f"- **[{mark}]** {_now()} {entry}"
-    if jf.exists():
-        content = jf.read_text(encoding="utf-8")
-    else:
-        content = f"# {day}\n"
-    content += line + "\n"
-    jf.write_text(content, encoding="utf-8")
+    line = f"- **[{mark}]** {spoor_common.stamped(_now())} {entry}"
+    spoor_common.append_journal(jf, line)
     _index_write()
-    return json.dumps({"ok": True, "journal": str(jf.name), "mark": mark})
+    return json.dumps({"ok": True, "journal": str(jf.name), "mark": mark, "agent": spoor_common.agent_name() or None})
 
 @mcp.tool()
 def workbench_read_journal(project: str, mark: str = "", limit: int = 30) -> str:
