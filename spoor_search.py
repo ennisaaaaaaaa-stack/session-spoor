@@ -144,22 +144,42 @@ def update_index(force: bool = False) -> dict:
 
 def search(query: str, type: str = "", project: str = "", agent: str = "", limit: int = 20) -> list[dict]:
     """FTS5 MATCH 查询。query 语法：词 / 短语引号 / OR / AND / NEAR。
-    过滤维度：type（如 journal:坑）、project、agent（具名住户）。"""
+    过滤维度：type（如 journal:坑）、project、agent（具名住户）。
+
+    trigram 最小粒度 3 字：query 为空或 <3 字时无法全文匹配。
+    此时若存在过滤维度（type/project/agent），降级为纯过滤查询——
+    “列出所有坑条目”（query="坑", type="journal:坑"）是自然用法，
+    不该空手而归。无任何过滤维度时如实返回空。
+    """
     update_index()
     c = _conn()
     try:
-        sql = "SELECT path, type, project, agent, snippet(docs, 0, '→', '←', '…', 24) AS frag FROM docs WHERE docs MATCH ?"
-        args: list = [query]
+        where: list[str] = []
+        args: list = []
+        q = query.strip()
+        if len(q) >= 3:
+            where.append("docs MATCH ?")
+            args.append(q)
         if type:
-            sql += " AND type=?"
+            where.append("type=?")
             args.append(type)
         if project:
-            sql += " AND project=?"
+            where.append("project=?")
             args.append(project)
         if agent:
-            sql += " AND agent=?"
+            where.append("agent=?")
             args.append(agent)
-        sql += " ORDER BY rank LIMIT ?"
+        if not where:
+            return []
+        sql = (
+            "SELECT path, type, project, agent, "
+            # 窗口48：journal行前缀(mark+时间戳)约吃掉20 token，24的窗口正文永远不可见
+            "snippet(docs, 0, '→', '←', '…', 48) AS frag FROM docs"
+        )
+        sql += " WHERE " + " AND ".join(where)
+        # rank 只在 MATCH 语境下有意义；纯过滤查询按 path 稳定排序
+        sql += " ORDER BY rank" if q and len(q) >= 3 else " ORDER BY path"
+        sql += " LIMIT ?"
         args.append(limit)
         rows = c.execute(sql, args).fetchall()
         return [{"path": r[0], "type": r[1], "project": r[2], "agent": r[3], "fragment": r[4]} for r in rows]

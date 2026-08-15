@@ -55,7 +55,7 @@ journal是读-改-写，ledger是追加——多进程同时写会交错。`spoo
 
 压测：8进程×20轮并发写，journal 160/160、ledger 160/160，零丢失。
 
-注意：`fcntl`是POSIX的。Windows上`flock`不可用，锁层会静默退化裸写——单agent无影响，Windows多agent共享暂不支持（要支持的话msvcrt.locking是路，欢迎PR）。
+注意：`fcntl`是POSIX的。Windows上`flock`不可用，锁层自动退化裸写——单agent无影响，Windows多agent共享暂不支持（要支持的话msvcrt.locking是路，欢迎PR）。两个server在Windows上正常启动和单agent使用（v0.3.1修复：此前`import fcntl`在模块顶层直接炸，退化逻辑永远执行不到）。
 
 ### 跨机器同步
 
@@ -65,6 +65,8 @@ journal是读-改-写，ledger是追加——多进程同时写会交错。`spoo
 # 各机器clone同一仓库到本地，各自跑（STIGMERGY_ROOT指向clone目录）
 # 干完活 push，开工前 pull
 ```
+
+**同一天多机同时写会git冲突**：journal按天文件追加，两台机器同一天各写各的journal，push时git对同一文件报冲突——解出来要么丢一边的记录要么手动缝。文件锁只管单机进程，管不了git。避免姿势：开工前先pull，写完立刻push；或每台机器用自己的`SPOOR_AGENT`名+当天pull后再写。ledger在gitignore里，不参与同步，无此问题。
 
 账本（ledger.jsonl）和运行时目录（scratch/、.locks/、.search/）在gitignore里——**过程共享，运行时不共享**。这是刻意的：scratch是这台机器此刻的呼吸，账本是全体的记忆。
 
@@ -87,7 +89,7 @@ SQLite默认的unicode61分词器对连续CJK文本**整段切成一个token**�
 
 trigram分词器（SQLite 3.34+内置）按3字符滑窗切：`文件锁`、`件锁在`、`锁在W`……任何≥3字的子串直接命中，大小写不敏感，零外部依赖。
 
-已知盲区：**2字词不命中**（trigram最小粒度是3）。中文关键词绝大多数≥3字；真要搜2字词，用type/project/agent维度过滤缩小范围再翻。jieba分词版留作后续可选依赖，不强加。
+已知盲区：**<3字的query不进全文索引**（trigram最小粒度是3）。但不会空手而归——query不足3字时若给了type/project/agent任一过滤维度，自动降级为纯过滤查询：`workbench_search(query="坑", type="journal:坑")`列出全部坑条目，`workbench_search(query="", agent="照夜")`列出照夜写的一切。真要全文搜2字词，用过滤维度缩小范围再翻。jieba分词版留作后续可选依赖，不强加。
 
 ## 安装
 

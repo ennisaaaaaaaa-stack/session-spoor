@@ -13,11 +13,15 @@ SPOOR_LOCK_*: 跨进程文件锁。fcntl.flock 在同一文件描述符上
 无锁退化：非POSIX平台 import fcntl 失败时直接裸写——
   单住户场景本来就无并发，行为与旧版完全一致。
 """
-import fcntl
 import json
 import os
 import time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows: no fcntl — degrade to unlocked single-writer mode
+    fcntl = None
 
 ROOT = Path(os.environ.get("STIGMERGY_ROOT", str(Path.home() / "Stigmergy")))
 LEDGER = ROOT / "ledger.jsonl"
@@ -25,7 +29,13 @@ LOCKDIR = ROOT / ".locks"
 
 
 def agent_name() -> str:
-    """当前住户名。空 = 匿名（单住户模式）。"""
+    """当前住户名。空 = 匿名（单住户模式）。
+
+    完全自定义：任何字符串都可以（UTF-8 支持中文名）。
+    开源场景——每个住户在**自己的环境变量**里声明自己的名字，
+    不存在任何写死的名单。fork 仓库的陌生人 set SPOOR_AGENT=自己的名字
+    即可署名，无需改任何代码。
+    """
     return os.environ.get("SPOOR_AGENT", "").strip()
 
 
@@ -36,7 +46,13 @@ def stamped(now: str) -> str:
 
 
 def _with_lock(path: Path, write_fn):
-    """在排它锁保护下执行 write_fn(path)。锁失败静默退化裸写。"""
+    """在排它锁保护下执行 write_fn(path)。锁失败静默退化裸写。
+
+    fcntl is None（Windows）→ 无锁直接写：单住户无并发，安全；
+    多住户并发写在 Windows 上不受保护——README 已声明。
+    """
+    if fcntl is None:
+        return write_fn(path)
     try:
         LOCKDIR.mkdir(parents=True, exist_ok=True)
         lockfile = LOCKDIR / (path.name + ".lock")
@@ -46,7 +62,7 @@ def _with_lock(path: Path, write_fn):
                 return write_fn(path)
             finally:
                 fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
-    except (OSError, ImportError):
+    except OSError:
         return write_fn(path)
 
 

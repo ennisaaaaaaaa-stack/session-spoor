@@ -217,8 +217,14 @@ def workbench_search(query: str, type: str = "", project: str = "", agent: str =
         raise
     if not rows:
         return "(no hits)"
+    def _rel(p: str) -> str:
+        # Windows 分隔符是 \，字符串 split('workbench/') 会失效——用 Path 语义
+        try:
+            return str(Path(p).relative_to(WB))
+        except ValueError:
+            return p
     return "\n".join(
-        f"[{r['type']}{'|' + r['agent'] if r['agent'] else ''}] {r['path'].split('workbench/')[-1]}\n  {r['fragment']}"
+        f"[{r['type']}{'|' + r['agent'] if r['agent'] else ''}] {_rel(r['path'])}\n  {r['fragment']}"
         for r in rows
     )
 
