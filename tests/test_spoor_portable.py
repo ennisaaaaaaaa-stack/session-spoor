@@ -28,7 +28,7 @@ async def call(session, tool, **kw):
 
 async def scratch_suite():
     params = StdioServerParameters(
-        command=VENV_PY, args=["/home/ubuntu/Stigmergy/scratchpad_server.py"],
+        command=VENV_PY, args=[SCRATCH_SERVER],
         env={"STIGMERGY_ROOT": ROOT, "PATH": "/usr/bin:/bin"},
     )
     async with stdio_client(params) as (r, w):
@@ -140,7 +140,7 @@ async def scratch_suite():
 
 async def workbench_suite():
     params = StdioServerParameters(
-        command=VENV_PY, args=["/home/ubuntu/Stigmergy/workbench_server.py"],
+        command=VENV_PY, args=[WORKBENCH_SERVER],
         env={"STIGMERGY_ROOT": ROOT, "PATH": "/usr/bin:/bin"},
     )
     async with stdio_client(params) as (r, w):
