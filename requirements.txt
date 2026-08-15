@@ -1,0 +1,2 @@
+mcp>=1.28.1,<2.0.0  # mcp 2.0.0 has known incompatibilities (tested on 1.28.1)
+# no other runtime deps — stdlib only
