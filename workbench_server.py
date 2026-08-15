@@ -84,7 +84,8 @@ def _index_write() -> None:
     lines = ["# 迹廊 · 项目索引", "", "| 项目 | 说明 | 状态 | 最近 |", "|---|---|---|---|"]
     for r in rows:
         status = "✅完成" if r["done"] else "🔨进行中"
-        lines.append(f"| {r['project']} | {(r['desc'] or '-').replace(chr(124), chr(124)*2)} | {status} | {r['touched']} |")
+        # GFM表格转义：管道字符必须转成 \|（|| 仍会破列——照照二轮验证）
+        lines.append(f"| {r['project']} | {(r['desc'] or '-').replace('|', chr(92)+'|')} | {status} | {r['touched']} |")
     lines += ["", f"_自动维护 · {_now()}_"]
     INDEX.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -212,8 +213,10 @@ def _json_safe(fn):
             return json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"})
     return wrapper
 
-for _name in list(mcp.tools.keys()):
-    mcp.tools[_name] = _json_safe(mcp.tools[_name])
+# (照照验证: FastMCP 1.28.1 无 mcp.tools 属性——原写法启动即AttributeError。
+#  正确路径是 ToolManager._tools，替换 .fn 已实测可行：schema 正常、异常转JSON。)
+for _t in getattr(getattr(mcp, "_tool_manager", None), "_tools", {}).values():
+    _t.fn = _json_safe(_t.fn)
 
 if __name__ == "__main__":
     mcp.run()

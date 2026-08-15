@@ -234,15 +234,15 @@ def scratchpad_export(space_id: str, selection: str, dest: str) -> str:
             if not f.exists():
                 return json.dumps({"ok": False, "error": f"not found: {f}"})
     # dest校验先行——即使nothing new也不允许探测任意路径
+    # (照照二轮验证: 相对路径拼接后必须再resolve校验，否则 exports/../../.. 可逃出ROOT)
     dest_p = Path(dest)
     if not dest_p.is_absolute():
         dest_p = ROOT / dest_p
-    else:
-        # 安全边界：dest强制落在ROOT下（照照review: 绝对路径可写任意位置）
-        try:
-            dest_p.resolve().relative_to(ROOT.resolve())
-        except ValueError:
-            return json.dumps({"ok": False, "error": f"dest must stay under {ROOT}"})
+    try:
+        dest_p = dest_p.resolve()
+        dest_p.relative_to(ROOT.resolve())
+    except ValueError:
+        return json.dumps({"ok": False, "error": f"dest must stay under {ROOT}"})
     # 过滤已导出的
     fresh = []
     for f in files:
@@ -319,8 +319,11 @@ def scratchpad_cleanup(space_id: str, mode: str = "export_marked", dest: str = "
 
 
 # 统一错误契约：包装所有已注册工具
-for _name in list(mcp.tools.keys()):
-    mcp.tools[_name] = _json_safe(mcp.tools[_name])
+# (照照验证: FastMCP 1.28.1 无 mcp.tools 属性——原写法启动即AttributeError。
+#  正确路径是 ToolManager._tools，但更稳的是替换 .fn，两处均已实测可行。
+#  这里用装饰器内层套法替代——见各工具定义处 @_json_safe)
+for _t in getattr(getattr(mcp, "_tool_manager", None), "_tools", {}).values():
+    _t.fn = _json_safe(_t.fn)
 
 if __name__ == "__main__":
     mcp.run()
