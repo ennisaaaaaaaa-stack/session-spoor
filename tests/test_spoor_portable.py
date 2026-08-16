@@ -242,6 +242,26 @@ async def workbench_suite():
             qp1 = await call(s, "ledger_query", limit=2)
             qp2 = await call(s, "ledger_query", limit=2, skip_recent=2)
             check("[ledger_query] skip_recent翻页无重叠", qp1.splitlines()[1:] != qp2.splitlines()[1:], qp1[:60] + " vs " + qp2[:60])
+            # 照照 round 7 边界测试收编：脏行跳过不炸（账本里混进非JSON行，查询降级继续）
+            Path(ROOT, "dirty-ledger-probe").write_text("x", encoding="utf-8")  # 占位标记本沙箱
+            lp = Path(ROOT, "ledger.jsonl")
+            with open(lp, "a", encoding="utf-8") as f:
+                f.write("{{{ this is NOT json\n")  # 脏行（未闭合花括号）
+            qd = await call(s, "ledger_query", limit=5)
+            check("[ledger_query][r7] 脏行跳过不炸", qd.startswith("(ledger"), qd[:60])
+
+            # ---- 空账本：全新ROOT第二个服务端实例，ledger.jsonl不存在 ----
+            import tempfile as _tf
+            ROOT_EMPTY = _tf.mkdtemp(prefix="spoor_empty_")
+            params_e = StdioServerParameters(command=VENV_PY, args=[WORKBENCH_SERVER],
+                                             env={"STIGMERGY_ROOT": ROOT_EMPTY, "PATH": "/usr/bin:/bin", "HOME": ROOT_EMPTY})
+            async with stdio_client(params_e) as (r2, w2):
+                async with ClientSession(r2, w2) as s2:
+                    await s2.initialize()
+                    qe = await call(s2, "ledger_query", limit=5)
+                    check("[ledger_query][r7] 空账本不炸", qe.startswith("(ledger 0 lines") and "no match" in qe, qe[:60])
+            shutil.rmtree(ROOT_EMPTY, ignore_errors=True)
+            Path(ROOT, "dirty-ledger-probe").unlink(missing_ok=True)
 
             lst = json.loads(await call(s, "workbench_list"))
             check("list shows project", any(r["project"] == "stigmergy" for r in lst), lst)
@@ -296,13 +316,20 @@ async def main():
             traceback.print_exc(file=sys.stderr)
 
     # ledger：v0.2 契约——事件名带七域前缀（wb_new/wb_complete 已迁移）
+    # 注意：套件中途故意注入过脏行（[r7] 脏行跳过测试），parse 时跳过非 JSON 行
     try:
         ledger = Path(ROOT, "ledger.jsonl").read_text(encoding="utf-8").strip().splitlines()
-        events = [json.loads(l)["event"] for l in ledger]
+        parsed = []
+        for l in ledger:
+            try:
+                parsed.append(json.loads(l))
+            except json.JSONDecodeError:
+                pass  # 套件注入的脏行，账本消费者（ledger_query）本来就跳过
+        events = [e["event"] for e in parsed]
         check("ledger has wb events",
-              {"threesome.workbench.new", "threesome.workbench.complete"} <= set(events), events)
+              {"threesome.workbench.new", "threesome.workbench.complete"} <= set(events), str(events))
         check("ledger keeps original task_id",
-              any(json.loads(l).get("task") == "中文任务" for l in ledger), "")
+              any(e.get("task") == "中文任务" for e in parsed), "")
     except Exception as e:
         check("ledger readable", False, f"{type(e).__name__}: {e}")
 
