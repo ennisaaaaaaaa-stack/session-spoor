@@ -168,6 +168,9 @@ async def workbench_suite():
 
             rj = await call(s, "workbench_read_journal", project="stigmergy", mark="坑")
             check("filter 坑 exact", "FTS trigger" in rj and "早期数据" not in rj, rj)
+            # v0.2契约: read_journal 带 reason 参数（裁决3——字段必须有真实数据来源）
+            rjr = await call(s, "workbench_read_journal", project="stigmergy", mark="坑", reason="开工仪式")
+            check("[v0.2] read_journal accepts reason", "FTS trigger" in rjr, rjr[:100])
             # 正文含"[坑]"字样但mark=判断 → 不应被捞
             await call(s, "workbench_journal", project="stigmergy", entry="文档里看到[坑]这个词但不是坑", mark="判断")
             rjf = await call(s, "workbench_read_journal", project="stigmergy", mark="坑")
@@ -200,6 +203,25 @@ async def workbench_suite():
             check("snippet save nested", sn.get("ok"), sn)
             got = await call(s, "workbench_snippet", project="stigmergy", name="utils/fix.py")
             check("snippet get", "print" in got, got)
+
+            # ---- v0.2 契约断言：六类账本事件带全前缀 ----
+            # （此时点 complete 还没发生，它在 suite 末尾——末尾 main 里另有断言）
+            led = [json.loads(l) for l in Path(ROOT, "ledger.jsonl").read_text(encoding="utf-8").strip().splitlines()]
+            kinds = {e["event"] for e in led}
+            check("[v0.2] ledger has prefixed wb events",
+                  {"threesome.workbench.new", "threesome.journal.write",
+                   "threesome.journal.read", "threesome.journal.search"} <= kinds, sorted(kinds))
+            check("[v0.2] no bare legacy event names",
+                  not [k for k in kinds if k in ("wb_new", "wb_complete")], sorted(kinds))
+            jw = next(e for e in led if e["event"] == "threesome.journal.write")
+            check("[v0.2] journal.write has entry_head<=80 & five-value mark",
+                  0 < len(jw["entry_head"]) <= 80 and jw["mark"] in ("判断", "数据", "坑", "待审·自", "待审·人"), jw)
+            jr = next(e for e in led if e["event"] == "threesome.journal.read" and e.get("reason"))
+            check("[v0.2] journal.read reason routed from tool arg", jr.get("reason") == "开工仪式", jr)
+            sg = next((e for e in led if e["event"] == "threesome.workbench.snippet_get"), None)
+            check("[v0.2] snippet_get ledgered (裁决5)", sg and sg["name"] == "utils/fix.py", sg)
+            js = next(e for e in led if e["event"] == "threesome.journal.search")
+            check("[v0.2] journal.search hits=条数不记内容", isinstance(js.get("hits"), int) and "fragment" not in js, js)
 
             lst = json.loads(await call(s, "workbench_list"))
             check("list shows project", any(r["project"] == "stigmergy" for r in lst), lst)
@@ -253,11 +275,12 @@ async def main():
             check(f"{name} server suite completed", False, f"{type(e).__name__}: {e}".replace(chr(10), ' | ')[:300])
             traceback.print_exc(file=sys.stderr)
 
-    # ledger：v0.2 应含 wb_new/wb_complete
+    # ledger：v0.2 契约——事件名带七域前缀（wb_new/wb_complete 已迁移）
     try:
         ledger = Path(ROOT, "ledger.jsonl").read_text(encoding="utf-8").strip().splitlines()
         events = [json.loads(l)["event"] for l in ledger]
-        check("ledger has wb events", {"wb_new", "wb_complete"} <= set(events), events)
+        check("ledger has wb events",
+              {"threesome.workbench.new", "threesome.workbench.complete"} <= set(events), events)
         check("ledger keeps original task_id",
               any(json.loads(l).get("task") == "中文任务" for l in ledger), "")
     except Exception as e:

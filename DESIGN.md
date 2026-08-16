@@ -52,7 +52,7 @@ workbench/
     ├── STATUS.md            —— 进行中状态：做到哪/下一步/卡在哪
     │                           （session死了下次醒来先读这个，不用考古）
     ├── design/              —— 设计底稿+architecture，多版本+时间戳
-    ├── journal/             —— 板块记录条：判断/数据/坑/待审 + 时间戳
+    ├── journal/             —— 板块记录条：判断/数据/坑/待审·自/待审·人 + 时间戳
     │                           （每天的工作痕迹，mark标记，压缩器读这里）
     └── snippets/            —— 复用件架：下次能直接抄的脚本/片段
                                 （不够格变skill，但绝不重写第三遍）
@@ -85,7 +85,7 @@ scratchpad_write(space_id, path, content, mode=overwrite|append)
 scratchpad_read(space_id, path, offset?, limit?)
 scratchpad_list(space_id, path?)
 scratchpad_export(space_id, selection, dest)    # 导出即打标
-scratchpad_mark(space_id, path, mark)            # 判断/数据/坑/待审
+scratchpad_mark(space_id, path, mark)            # 判断/数据/坑/待审·自/待审·人
 scratchpad_status(space_id) -> {files, size, marks, exported, age}
 scratchpad_cleanup(space_id, mode=export_all|export_marked|discard)
 ```
@@ -113,9 +113,9 @@ archive_query(fts)
 
 ## 三个共享契约（跟照照主线异步对齐，不阻塞）
 
-1. **mark词汇表**（涂鸦房↔工作台↔压缩器）：`判断/数据/坑/待审`——已拍板，不加
+1. **mark词汇表**（涂鸦房↔工作台↔压缩器）：`判断/数据/坑/待审·自/待审·人`——已拍板；待审两档法官（自=主agent消化，人=人类拍板）是 03ffb87 的拆分，不是加新词
 2. **export格式**（涂鸦房↔档案房）：Markdown bundle，判断在前数据在后——已拍板
-3. **账本事件格式**（全部↔账本）：清理/导出/版本/消化四事件——等照照词汇表，先用mock字段
+3. **账本事件格式**（全部↔账本）：journal/workbench 侧契约 v0.2 已定并落地（docs/contract-journal-workbench-events-draft.md）；scratchpad 侧待议
 
 ## 回流压缩器（第二期）
 
@@ -138,7 +138,7 @@ compress(session_log, scratchpad_marks, workbench_journal, ruleset) ->
 引擎层独立开源（本repo），Portalk以配置和规则集接入：
 - 编排层挂载钩子：spawn时create、结束时status→cleanup
 - 消化门槛字段、visibility标记：Portalk皮肤
-- 账本事件格式：对接Portalk账本词汇表（照照起草中）
+- 账本事件格式：journal/workbench 契约 v0.2 已落地；scratchpad.* 侧对接Portalk账本词汇表（照照起草中）
 
 不依赖Portalk任何部分，任何MCP client直接用。
 
