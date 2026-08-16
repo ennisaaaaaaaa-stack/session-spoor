@@ -147,7 +147,7 @@ async def workbench_suite():
         async with ClientSession(r, w) as s:
             await s.initialize()
             lt = await s.list_tools()
-            check("workbench tools listed", len(lt.tools) == 9, [t.name for t in lt.tools])
+            check("workbench tools listed", len(lt.tools) == 10, str([t.name for t in lt.tools]))
 
             n1 = json.loads(await call(s, "workbench_new", project="stigmergy", description="agent过程管理系统"))
             check("new ok", n1.get("ok"), n1)
@@ -223,6 +223,26 @@ async def workbench_suite():
             js = next(e for e in led if e["event"] == "threesome.journal.search")
             check("[v0.2] journal.search hits=条数不记内容", isinstance(js.get("hits"), int) and "fragment" not in js, js)
 
+            # ---- ledger_query：读取工具（审计层唯一读通道）----
+            ledpath = Path(ROOT, "ledger.jsonl")
+            q0 = await call(s, "ledger_query", limit=3)
+            check("[ledger_query] head shows totals", q0.startswith("(ledger") and "hits" in q0, q0[:80])
+            check("[ledger_query] 倒序返回原始JSONL行", all(l.startswith("{") for l in q0.splitlines()[1:]), q0[:120])
+            qk = await call(s, "ledger_query", kind="cleanup", limit=5)
+            check("[ledger_query] kind前缀过滤命中cleanup", all('"event": "cleanup"' in l for l in qk.splitlines()[1:]), qk[:200])
+            qn = await call(s, "ledger_query", contains="不存在的字符串xyz", limit=5)
+            check("[ledger_query] contains无命中→no match", "no match" in qn, qn)
+            # 反自我放大：查询动作本身零写入（查询前后账本行数不变）
+            n_before = len(ledpath.read_text(encoding="utf-8").strip().splitlines())
+            q1 = await call(s, "ledger_query", kind="threesome.", limit=2)
+            q2 = await call(s, "ledger_query", contains="journal", limit=2)
+            n_after = len(ledpath.read_text(encoding="utf-8").strip().splitlines())
+            check("[ledger_query] 读账本不记账(反自我放大)", n_after == n_before, f"{n_before}→{n_after}")
+            # 翻页：skip_recent 跳过最新命中后仍能取到更早的
+            qp1 = await call(s, "ledger_query", limit=2)
+            qp2 = await call(s, "ledger_query", limit=2, skip_recent=2)
+            check("[ledger_query] skip_recent翻页无重叠", qp1.splitlines()[1:] != qp2.splitlines()[1:], qp1[:60] + " vs " + qp2[:60])
+
             lst = json.loads(await call(s, "workbench_list"))
             check("list shows project", any(r["project"] == "stigmergy" for r in lst), lst)
 
@@ -255,7 +275,7 @@ async def windows_sim_suite():
             await s.initialize()
             lt = await s.list_tools()
             check("[v0.3.1][win-sim] workbench server starts without fcntl",
-                  len(lt.tools) == 9, str([t.name for t in lt.tools]))
+                  len(lt.tools) == 10, str([t.name for t in lt.tools]))
             # journal写入走 _with_lock 退化路径（fcntl=None → 裸写）必须成功
             wj = json.loads(await call(s, "workbench_journal", project="stigmergy",
                                        entry="Windows模拟下锁层退化裸写成功", mark="数据"))
