@@ -390,6 +390,45 @@ async def archive_suite():
             check("[arch] rejected put/link leaves no DB trace",
                   n == 2 and link_rows == 1, f"versions={n} links={link_rows}")
 
+            # ---- round 9（照照）：TOCTOU 修复回归 ----
+            # dedup put 带不同 source_ref -> 回显 source_ref_dropped，不静默丢
+            pd2 = json.loads(await call(s, "archive_put", doc="hongxinshe",
+                                        content="# 世界观 v1\n\n架空明末背景。\n", source_ref="ledger:export:77"))
+            check("[arch][r9] dedup put 回显 source_ref_dropped",
+                  pd2.get("dedup") is True and pd2.get("source_ref_dropped") is True, pd2)
+            # put 事件 dedup 字段进账本（并发竞态的审计铁证）
+            led_r9 = []
+            for l in Path(ROOT, "ledger.jsonl").read_text(encoding="utf-8").strip().splitlines():
+                try:
+                    e = json.loads(l)
+                except json.JSONDecodeError:
+                    continue
+                if e.get("event") == "threesome.archive.put" and e.get("dedup") is True:
+                    led_r9.append(e)
+            check("[arch][r9] 账本 put 事件带 dedup=true",
+                  any(e.get("source_ref") == "ledger:export:77" and e.get("dedup") is True for e in led_r9)
+                  and any(e.get("dedup") is True for e in led_r9),
+                  f"count={len(led_r9)}")
+            # 唯一索引存在 + 旧普通索引已撤
+            cu = sqlite3.connect(Path(ROOT, "archive", "index.db"))
+            ux = cu.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='ux_versions_doc_vid'").fetchone()
+            old_ix = cu.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='ix_versions_doc'").fetchone()
+            # link doc 校验：错 doc 拒；同内容双 doc 歧义回显
+            lk_bad2 = json.loads(await call(s, "archive_link", from_version=v2,
+                                            to_uri="tideline://y", relation="r", doc="nosuchdoc"))
+            p_al = json.loads(await call(s, "archive_put", doc="alpha", content="shared-r9-check\n"))
+            p_be = json.loads(await call(s, "archive_put", doc="beta", content="shared-r9-check\n"))
+            lk_amb2 = json.loads(await call(s, "archive_link", from_version=p_al["version_id"],
+                                            to_uri="tideline://z", relation="r"))
+            lk_ok2 = json.loads(await call(s, "archive_link", from_version=p_al["version_id"],
+                                           to_uri="tideline://w", relation="r", doc="alpha"))
+            cu.close()
+            check("[arch][r9] 唯一索引在位/旧索引已撤", bool(ux) and not old_ix, f"ux={ux} old={old_ix}")
+            check("[arch][r9] link 错 doc 被拒", lk_bad2.get("ok") is False, lk_bad2)
+            check("[arch][r9] 同内容双 doc，link 歧义回显 docs",
+                  lk_amb2.get("ok") is True and lk_amb2.get("docs") == ["alpha", "beta"], lk_amb2)
+            check("[arch][r9] link 带 doc 精确锚定通过", lk_ok2.get("ok") is True and "docs" not in lk_ok2, lk_ok2)
+
 async def windows_sim_suite():
     """Windows模拟（照照round-4方法）：sys.modules['fcntl']=None 拦截fcntl，
     两个server必须仍能启动握手——v0.3顶层 import fcntl 在Windows上import即死。"""

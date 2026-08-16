@@ -50,7 +50,6 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS versions(
     doc TEXT, version_id TEXT, parent TEXT, bytes INTEGER, source_ref TEXT, ts TEXT
 );
-CREATE INDEX IF NOT EXISTS ix_versions_doc ON versions(doc);
 CREATE TABLE IF NOT EXISTS links(
     from_version TEXT, to_uri TEXT, relation TEXT, ts TEXT
 );
@@ -58,6 +57,19 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
     body, doc UNINDEXED, version_id UNINDEXED, tokenize='trigram'
 );
 """
+# round 9（照照裁决）：普通索引换唯一索引 (doc, version_id)——查重与插入两步之间的
+# TOCTOU 窗口在多 agent 并发下会放进重复版本行。INSERT OR IGNORE + rowcount==0 → dedup。
+# 迁移坑（照照随附）：唯一索引在已有重复行的旧库上建不起来（IntegrityError）——
+# 先清重再建索引。清重保留每组 (doc, version_id) 的最早一行（MIN(rowid)），与
+# "latest 现算指针取最后插入行"无冲突（重复行内容相同，谁存活都指同一内容）。
+_MIGRATE_DEDUPE = (
+    "DELETE FROM versions WHERE rowid NOT IN (SELECT MIN(rowid) FROM versions GROUP BY doc, version_id)",
+    "DELETE FROM fts WHERE rowid NOT IN (SELECT MIN(rowid) FROM fts GROUP BY doc, version_id)",
+    "DROP INDEX IF EXISTS ix_versions_doc",  # 被唯一索引的前缀覆盖，撤冗余
+)
+_UNIQUE_IX = "CREATE UNIQUE INDEX IF NOT EXISTS ux_versions_doc_vid ON versions(doc, version_id)"
+
+_inited = False
 
 
 # ---------- 内部 ----------
@@ -68,9 +80,25 @@ def _ledger(event: dict) -> None:
 
 
 def _conn() -> sqlite3.Connection:
+    global _inited
     AR.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(DB, timeout=10)
-    c.executescript(_SCHEMA)
+    if not _inited:
+        c.executescript(_SCHEMA)
+        for stmt in _MIGRATE_DEDUPE:
+            c.execute(stmt)
+        c.commit()
+        try:
+            c.execute(_UNIQUE_IX)
+            c.commit()
+        except sqlite3.IntegrityError as e:
+            c.close()
+            raise RuntimeError(
+                f"archive index.db 存在未清干净的重复行，唯一索引建不起来。"
+                f"手动清重后重启: DELETE FROM versions WHERE rowid NOT IN "
+                f"(SELECT MIN(rowid) FROM versions GROUP BY doc, version_id); :: {e}"
+            ) from e
+        _inited = True
     return c
 
 
@@ -116,35 +144,47 @@ def archive_put(doc: str, content: str, parent_version: str = "", source_ref: st
     b = len(content.encode("utf-8"))
     c = _conn()
     try:
-        existed = c.execute(
-            "SELECT 1 FROM versions WHERE doc=? AND version_id=?", (doc, vid)
-        ).fetchone()
-        dedup = bool(existed)
+        if parent_version and not c.execute(
+            "SELECT 1 FROM versions WHERE doc=? AND version_id=?", (doc, parent_version)
+        ).fetchone():
+            return json.dumps({"ok": False, "error": f"parent_version not found: {parent_version}"})
+        # round 9（照照裁决）：查重→插入两步之间的 TOCTOU 窗口在多 agent 并发下放进重复版本行。
+        # 修法=唯一索引 + INSERT OR IGNORE + rowcount==0 兜底 dedup——正确性不再依赖时序。
+        # 文件先写（幂等：内容寻址，同内容同文件名，重复写无害），崩溃窗口只留孤儿文件不留缺文件行。
+        fdir = AR / doc
+        fdir.mkdir(parents=True, exist_ok=True)
+        (fdir / f"{vid}.md").write_text(content, encoding="utf-8")
+        cur = c.execute(
+            "INSERT OR IGNORE INTO versions(doc, version_id, parent, bytes, source_ref, ts) VALUES (?,?,?,?,?,?)",
+            (doc, vid, parent_version or "", b, source_ref or "", _now()),
+        )
+        dedup = (cur.rowcount == 0)
         if not dedup:
-            if parent_version and not c.execute(
-                "SELECT 1 FROM versions WHERE doc=? AND version_id=?", (doc, parent_version)
-            ).fetchone():
-                return json.dumps({"ok": False, "error": f"parent_version not found: {parent_version}"})
-            # 内容文件：不可变，只在首次出现时写
-            fdir = AR / doc
-            fdir.mkdir(parents=True, exist_ok=True)
-            (fdir / f"{vid}.md").write_text(content, encoding="utf-8")
-            c.execute(
-                "INSERT INTO versions(doc, version_id, parent, bytes, source_ref, ts) VALUES (?,?,?,?,?,?)",
-                (doc, vid, parent_version or "", b, source_ref or "", _now()),
-            )
             c.execute(
                 "INSERT INTO fts(body, doc, version_id) VALUES (?,?,?)", (content, doc, vid)
             )
-            c.commit()
+        c.commit()
+        # round 9（照照中等1）：dedup 命中时请求的 source_ref 不落库——静默丢弃是审计断链。
+        # 回显 source_ref_dropped=true（只在真丢了时带这个键），溯源指针的去向可追溯。
+        source_ref_dropped = False
+        if dedup and source_ref:
+            stored = c.execute(
+                "SELECT source_ref FROM versions WHERE doc=? AND version_id=?", (doc, vid)
+            ).fetchone()
+            source_ref_dropped = not (stored and stored[0] == source_ref)
     finally:
         c.close()
     # 契约 v0.2：put 不记 entry_head（原则1，自毁条款第一次应用）。
     # dedup 也记账——账本记事件不记状态，put 发生过就是发生过。
+    # dedup 字段进事件（round 9 增补）：两次 put 同 vid 且第二次 dedup=true = 并发竞态的审计铁证。
+    resp = {"ok": True, "doc": doc, "version_id": vid,
+            "dedup": dedup, "bytes": b}
+    if source_ref_dropped:
+        resp["source_ref_dropped"] = True
     _ledger({"event": "threesome.archive.put", "doc": doc, "version_id": vid,
-             "parent_version": parent_version or None, "bytes": b, "source_ref": source_ref or None})
-    return json.dumps({"ok": True, "doc": doc, "version_id": vid,
-                       "dedup": dedup, "bytes": b}, ensure_ascii=False)
+             "parent_version": parent_version or None, "bytes": b, "source_ref": source_ref or None,
+             "dedup": dedup})
+    return json.dumps(resp, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -223,22 +263,48 @@ def archive_list(doc: str = "") -> str:
 
 
 @mcp.tool()
-def archive_link(from_version: str, to_uri: str, relation: str) -> str:
-    """建指针：档案版本 → 外部 URI（如 Tideline 记忆）。边界上只记账本，不搬内容。"""
+def archive_link(from_version: str, to_uri: str, relation: str, doc: str = "") -> str:
+    """建指针：档案版本 → 外部 URI（如 Tideline 记忆）。边界上只记账本，不搬内容。
+
+    Args:
+        from_version: 源版本号（内容哈希）
+        to_uri: 目标 URI，原样记录（是指针不是内容）
+        relation: 关系名（如 "same_story"）
+        doc: 可选。同内容归入多个 doc 时（内容寻址的合法场景）用它精确锚定
+             (doc, version_id) 二元组；不填则全表校验，命中多个 doc 时回显 docs 列表。
+             link 本身挂在内容上不挂名义——同 vid 同内容，挂哪个 doc 名义下语义等价。
+             （round 9 照照中等2：校验带 doc，语义对齐契约的二元组）
+    """
     if not to_uri or not relation:
         return json.dumps({"ok": False, "error": "to_uri and relation are required"})
     c = _conn()
     try:
-        if not c.execute("SELECT 1 FROM versions WHERE version_id=?", (from_version,)).fetchone():
-            return json.dumps({"ok": False, "error": f"from_version not found: {from_version}"})
+        if doc:
+            if not c.execute(
+                "SELECT 1 FROM versions WHERE doc=? AND version_id=?", (doc, from_version)
+            ).fetchone():
+                return json.dumps({"ok": False,
+                                   "error": f"version {from_version} not found under doc {doc}"})
+            docs = [doc]
+        else:
+            rows = c.execute(
+                "SELECT DISTINCT doc FROM versions WHERE version_id=?", (from_version,)
+            ).fetchall()
+            if not rows:
+                return json.dumps({"ok": False, "error": f"from_version not found: {from_version}"})
+            docs = [r[0] for r in rows]
         c.execute("INSERT INTO links(from_version, to_uri, relation, ts) VALUES (?,?,?,?)",
                   (from_version, to_uri, relation, _now()))
         c.commit()
     finally:
         c.close()
     _ledger({"event": "threesome.archive.link", "from_version": from_version,
-             "to_uri": to_uri, "relation": relation})
-    return json.dumps({"ok": True, "from_version": from_version, "to_uri": to_uri}, ensure_ascii=False)
+             "to_uri": to_uri, "relation": relation,
+             "doc": doc or (docs[0] if len(docs) == 1 else None)})
+    resp = {"ok": True, "from_version": from_version, "to_uri": to_uri}
+    if len(docs) > 1:
+        resp["docs"] = docs  # 歧义回显：同内容挂在多个 doc 名义下，审计时说清楚
+    return json.dumps(resp, ensure_ascii=False)
 
 
 @mcp.tool()

@@ -42,3 +42,11 @@
 
 - **source_ref 真空区（照照审出，已入事件表）**：scratchpad_export 只写文件不调 archive.put，导出→归档毕业路径的账本链路原是断的。修法=archive.put 可选 source_ref 字段：涂鸦房直归档不填，毕业路径归档填。账本管发生过什么，source_ref 管"这两个事件是同一件事"。
 - **ledger_query 读取不记账（批准，表述升级）**："审计层信息流单向——正文流进审计，审计不回流。读取若记账等于在账本里开一条影响正文的通道，注入面就回来了。"单向阀表述入 journal-workbench 契约（本轮同步）。
+
+## round 9 裁决落地（照照审出 TOCTOU 竞态，2026-08-16）
+
+- **archive_put 的 TOCTOU 竞态（真 bug，坐实+修复）**：查重与插入两步之间，多 agent 并发归档同一内容会双插版本行（照照用延时注入坐实：两行、两个 put 事件都 dedup=False；我方用 threading.Barrier 卡 check-后-insert-前 窗口独立复现，旧 schema 下 rows=2）。修法（照照副本验证）：普通索引→唯一索引 (doc, version_id)，INSERT→INSERT OR IGNORE，rowcount==0 兜底 dedup=True。**正确性从依赖时序变成不依赖时序。**
+- **迁移坑（照照随附）**：唯一索引在有重复行的旧库上建不起来（IntegrityError）。_conn() 启动时先清重（每组 (doc,version_id) 保留 MIN(rowid)）再建唯一索引；FTS 同步清重；旧普通索引 ix_versions_doc 撤销（被唯一索引前缀覆盖）。清重失败 → RuntimeError 带手动修复 SQL，不静默。
+- **dedup 命中时 source_ref 静默丢弃（照照中等1）**：毕业路径归档填了 source_ref 但版本已存在 → INSERT 跳过 → 溯源指针丢。修法：dedup 分支比对存量 source_ref，不一致时回显 `source_ref_dropped: true`（只在真丢了时带键）。put 事件同时新增 `dedup` 字段进账本——两次 put 同 vid 且第二次 dedup=true = 并发场景的审计铁证。
+- **archive_link 校验不查 doc（照照中等2，洄裁决：修）**：契约语义里版本是 (doc, version_id) 二元组，不修等于契约说一套代码做一套。修法：link 加可选 doc 参数——填了精确锚定二元组；不填全表校验，命中多个 doc 回显 docs 列表（歧义不吞）。links 表不加列：link 挂在内容上不挂名义（同 vid 同内容，挂哪个 doc 名义下语义等价），为洁癖抬 schema 成本不值。
+- **_conn() 重复 DDL（照照细节条，已修）**：模块级 `_inited` flag，首次建完跳过。承认这是性能洁癖不是正确性问题——但一行成本换 95 项测试里每个工具调用都少跑一遍 DDL，值。
