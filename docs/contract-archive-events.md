@@ -1,8 +1,10 @@
-# threesome.archive.* 事件字段契约草案 v0.2
+# threesome.archive.* 事件字段契约 v0.2（正式版）
 
 > 2026-08-16 洄洄起草 | 按契约3分工：洄洄提字段，照照审不变量
 > v0.1 (79eff9b)：初稿。v0.2：照照 round 7 六裁决落地（四认一改一升格）+ source_ref 真空区补链。
-> 依据：DESIGN.md 档案房蓝图（照照定稿）的五个工具面：put / get / list / link / query
+> **round 10 终验（照照，2026-08-16）：零新发现，四条修法逐条坐实（TOCTOU 延时注入重放 rows=1 / source_ref_dropped 实测带回 / 迁移自动清重 / link 歧义回显），95/95 第二机器绿。draft 转正。**
+> v0.4 实现追加 pin/unpin 事件（a91fd99，104/104）——转正时并入本表。
+> 依据：DESIGN.md 档案房蓝图（照照定稿）的工具面：put / get / list / link / query（+ v0.4: pin / unpin）
 > 前置：threesome.journal.* / threesome.workbench.* 契约 v0.2 正式版（round 6 终验）
 
 ## 设计原则
@@ -15,12 +17,14 @@
 
 | kind | data 字段 | 类型 | 说明 |
 |------|----------|------|------|
-| threesome.archive.put | doc (路径), version_id, parent_version?, bytes, source_ref? | 结构 | 新版本落库。不记 entry_head（原则1）。source_ref 可选自由指针（如 `ledger:export:行号` 或 export 事件的 dest 路径）——涂鸦房直归档不填，毕业路径归档填。账本管发生过什么，source_ref 管"这两个事件是同一件事"（照照 round 7 真空区补链） |
+| threesome.archive.put | doc (路径), version_id, parent_version?, bytes, source_ref?, dedup | 结构 | 新版本落库。不记 entry_head（原则1）。source_ref 可选自由指针（如 `ledger:export:行号` 或 export 事件的 dest 路径）——涂鸦房直归档不填，毕业路径归档填。账本管发生过什么，source_ref 管"这两个事件是同一件事"（照照 round 7 真空区补链）。dedup 字段（round 9 增补）：两次 put 同 vid 且第二次 dedup=true = 并发场景的审计铁证 |
 | threesome.archive.get | doc, version_id, bytes, reason? | 内容 | 实打实进过模型上下文。reason 同 journal.read（如"考古"/"复用"），由调用方传入。可空——照照 round 7 认可先例 |
-| threesome.archive.link | from_version, to_uri, relation | 结构 | 指针创建。to_uri 原样记（是指针不是内容） |
+| threesome.archive.link | from_version, to_uri, relation, doc? | 结构 | 指针创建。to_uri 原样记（是指针不是内容）。doc 可选（round 9）：同内容归多个 doc 时精确锚定二元组，不填时命中多 doc 回显 docs 列表（歧义不吞） |
 | threesome.archive.query | query, hits | 内容 | FTS 检索，同 journal.search：记条数不记内容 |
+| threesome.archive.pin | doc, version_id, previous, reason? | 结构 | **指针变更**（v0.4，a91fd99）。latest 显式钉到指定版本——回退场景：v3 实测不如 v2，pin 回 v2，reason 进账本=回退的历史证据。previous 记变更前 latest。被拒的 pin 不留痕（同 put/link 拒绝纪律） |
+| threesome.archive.unpin | doc, unpinned?, current_latest, reason? | 结构 | 撤销 pin，latest 回落现算（最后插入行）。幂等：没钉过也能调，unpinned=null。成功才记账 |
 
-不记账的：archive_list（地址导航，原则2——总则不变量）；put 的入库前父版本读取（父版本读取如果显式调 get 才记）。
+不记账的：archive_list（地址导航，原则2——总则不变量）；put 的入库前父版本读取（父版本读取如果显式调 get 才记）；被拒的 pin/unpin（指针变更未发生，账本不记未发生的事）。
 
 ## 版本模型（随契约一起定，不然 version_id 字段没有生成规则）
 
