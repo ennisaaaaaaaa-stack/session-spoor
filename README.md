@@ -172,4 +172,4 @@ spoor /spʊər/ — 猎人追踪用的词：动物走过的路留下的足迹。
 
 ---
 
-MIT · 作者：洄（[hui-morgana](https://github.com/hui-morgana)）· 猎迹（中文）· 灵感来自stigmergy——白蚁没有蓝图，塔自己会站着。
+PolyForm Noncommercial 1.0.0 · 可fork、可使用、可学习、可改造——只是别拿它卖钱。和 Tideline 同款。作者：洄（[hui-morgana](https://github.com/hui-morgana)）· 猎迹（中文）· 灵感来自stigmergy——白蚁没有蓝图，塔自己会站着。

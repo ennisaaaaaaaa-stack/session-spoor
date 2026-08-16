@@ -61,4 +61,14 @@
 ## round 12 挂账（Zcode 提出洄裁决：挂账不修）
 
 - **pin_broken 重复记账**：断链不修的话每次 get 记一条，高频 doc 刷账本。反方也成立——断链本来就该修，每条记录都是催促，且断链是罕见态（pin 的版本行只在外部损坏/手工清库时消失）。裁决：挂账不修，不为罕见态给 pins 表加状态字段。若未来断链场景变常见（如外部同步工具批量清库），重议。
+
+## round 13 挂账与落地（Zcode Windows 真机 review）
+
+zcode 在甜心的 Windows 机上跑了全量套件：sqlite3 3.50.4 ✓，111/115，4 个失败全部定位。其中一个是真 bug——**_safe_rel 在 Windows 上放行 rooted 路径**（`Path("/etc/passwd").is_absolute()` 在 nt 语义下 False，join 丢 base，读写双向逃逸；zcode 亲眼看到 1 字节落在 `C:\etc\passwd`）。前十二轮没抓到：POSIX 上这些向量本来就被拒，CI 全绿；win-sim 套件只测启动和锁退化，没测路径守卫。
+
+- **落地（本轮已修）**：两份 _safe_rel 双视角检查——本机 `Path` 语义 + `PureWindowsPath` Windows 视角（`rel.drive/root`、`win.drive/root`、双方 `..`）。纯 POSIX 上 `C:/x` 是字面量目录，但同步到 Windows 读取端即成盘符逃逸向量——家庭部署三位实例共用一份 root，这是现实场景不只是理论。rooted（`/x`、`\x`）与盘符（`C:/x`）全向量拦截，合法路径全过。
+- **落地（本轮已修）**：unpin 的 no-versions 守卫挡死断链 pin 的唯一清除路径——版本行整批被清、pin 残留（r11 同族外部损坏态）时，unpin 被 `no versions` 拒绝，pins 行永留，每次 get 刷 pin_broken。修法按 zcode 建议：pins 检查提到守卫前，有 pin 就允许清（指针变更而已）。守卫对无版本无 pin 的 doc 仍然活着。
+- **落地（本轮已修）**：显示层归一 as_posix()——write/mark 返回的 path、list 的 file 字段、bundle 排序名、search 结果 _rel、cleanup 的 selection。marks 文件名用 `target.as_posix()` 后跨平台同名（POSIX 存字面量带斜杠文件名、Windows 存嵌套目录的互不兼容分叉，趁没有生产数据归一）。
+- **挂账（洄裁决：不修）**：get 读文件不校验内容哈希——外部篡改会静默服务错内容（r11 把外部损坏纳入威胁模型后算同族）。sha256 微秒级，但读路径加不加校验是成本裁量，挂账。若档案房开始承载"被引用即需完整"的场景，重议。
+- **zcode 真机验证**：sqlite3 3.50.4（Windows 自带 Python 的 sqlite3 模块）≥3.34，trigram FTS 全绿——契约里"zcode 真机仍需验 sqlite3 ≥3.34"自此关闭。
 - （round 11 遗留挂账沿用：pin 的 previous 字段并发窗口——低频操作账本兜底；schema_version meta 表——第三次改表结构时再上。）

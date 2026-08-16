@@ -64,6 +64,25 @@ async def scratch_suite():
             except Exception: ok2 = False
             check("[v0.2] absolute path error is JSON", ok2, e2[:150])
 
+            # ---- round 13（Zcode review）：Windows/nt 语义的路径逃逸 ----
+            # Path("/etc/x").is_absolute() 在 nt 语义下 False（有根无盘符），join 丢 base → 双向逃逸。
+            # 纯 POSIX 跑这里两个向量都已在 absolute 拦截，但断言守卫向量齐全——CI 全绿≠Windows安全。
+            e2r = await call(s, "scratchpad_write", space_id=sid, path="\\\\etc\\passwd", content="x")
+            try:
+                j2r = json.loads(e2r); ok2r = j2r.get("ok") is False and "must be relative" in j2r.get("error", "")
+            except Exception: ok2r = False
+            check("[v0.2][r13] rooted path (no drive) rejected on any platform semantics",
+                  ok2r, e2r[:150])
+            e2d = await call(s, "scratchpad_write", space_id=sid, path="C:/evil.md", content="x")
+            try:
+                j2d = json.loads(e2d); ok2d = j2d.get("ok") is False and "must be relative" in j2d.get("error", "")
+            except Exception: ok2d = False
+            check("[v0.2][r13] drive-absolute path (C:/evil.md) rejected on any platform",
+                  ok2d, e2d[:150])
+            check("[v0.2][r13] no rooted/drive file landed outside space",
+                  not Path(ROOT, "etc/passwd").exists() and not Path("C:").exists()
+                  and not Path(ROOT, "evil.md").exists(), "")
+
             e3 = await call(s, "scratchpad_read", space_id=f"{sid}/../..", path="ledger.jsonl")
             try:
                 j3 = json.loads(e3); ok3 = j3.get("ok") is False and "invalid" in j3.get("error", "")
@@ -551,6 +570,37 @@ async def archive_suite():
             r11_line2 = next((ln for ln in l_all2.splitlines() if ln.strip().startswith("r11doc")), "")
             check("[arch][r11] 全库概览断链回显 ⚠️ pin broken",
                   "⚠️ pin broken" in r11_line2 and v5 in r11_line2, r11_line2)
+
+            # ---- round 13（Zcode review，Windows 真机）：unpin 守卫挡死断链 pin 的清除 ----
+            # 契约写"显式 unpin 是唯一清除路径"，但版本行整批被清、pin 残留的外部损坏态
+            # （r11 同族），unpin 曾被 no-versions 守卫拒绝 → pins 行永留、每次 get 刷 pin_broken。
+            # 场景A：r11doc 删光全部版本行（整批清+pin残留）→ unpin 必须成功清 pin
+            cu = sqlite3.connect(Path(ROOT, "archive", "index.db"))
+            cu.execute("DELETE FROM versions WHERE doc='r11doc'")
+            cu.commit(); cu.close()
+            n_ver = cu_n = None
+            cu2 = sqlite3.connect(Path(ROOT, "archive", "index.db"))
+            n_ver = cu2.execute("SELECT COUNT(*) FROM versions WHERE doc='r11doc'").fetchone()[0]
+            n_pin = cu2.execute("SELECT COUNT(*) FROM pins WHERE doc='r11doc'").fetchone()[0]
+            cu2.close()
+            check("[arch][r13] 前置：r11doc 版本清光且 pin 残留（外部损坏态）",
+                  n_ver == 0 and n_pin == 1, f"versions={n_ver} pins={n_pin}")
+            un_broken = json.loads(await call(s, "archive_unpin", doc="r11doc", reason="r13清残留pin"))
+            check("[arch][r13] 断链 pin 的 unpin 不再被 no-versions 守卫拒绝",
+                  un_broken.get("ok") is True and un_broken.get("unpinned") == v4, un_broken)
+            cu3 = sqlite3.connect(Path(ROOT, "archive", "index.db"))
+            n_pin2 = cu3.execute("SELECT COUNT(*) FROM pins WHERE doc='r11doc'").fetchone()[0]
+            cu3.close()
+            check("[arch][r13] pins 行真被清除（后续 get 不再刷 pin_broken）", n_pin2 == 0, n_pin2)
+            # 场景B：版本行还在的 doc（hongxinshe 断链态，v1/v3 尚存）→ unpin 也清（旧代码此场景本就能过，回归保护）
+            un_hx = json.loads(await call(s, "archive_unpin", doc="hongxinshe", reason="r13回归保护"))
+            check("[arch][r13] 部分存版的断链 pin unpin 同样 ok",
+                  un_hx.get("ok") is True and un_hx.get("unpinned") == v2, un_hx)
+            # 守卫仍然活着：全新 doc（无版本无pin）→ no versions 拒绝
+            un_fresh = json.loads(await call(s, "archive_unpin", doc="never-existed"))
+            check("[arch][r13] 无版本无 pin 的 doc 仍被 no versions 拒绝",
+                  un_fresh.get("ok") is False and "no versions" in un_fresh.get("error", ""), un_fresh)
+
 
 async def windows_sim_suite():
     """Windows模拟（照照round-4方法）：sys.modules['fcntl']=None 拦截fcntl，
