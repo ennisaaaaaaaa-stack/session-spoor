@@ -2,7 +2,7 @@
 
 **Every session leaves a trail.**
 
-Agent干活的痕迹管理系统——MCP工具集，三层结构：涂鸦房（临时工草稿，用完即弃）、工作台（主agent常驻手稿，带全文检索）、档案房（项目归档，版本化——设计中）。
+Agent干活的痕迹管理系统——MCP工具集，三层结构：涂鸦房（临时工草稿，用完即弃）、工作台（主agent常驻手稿，带全文检索）、档案房（项目归档，版本化——契约 v0.1 起草中）。
 
 ## 为什么
 
@@ -18,7 +18,7 @@ Agent的session结束，过程就蒸发了。临时文件散在/tmp，进行中�
 |---|---|---|---|
 | L1 | scratch/ 涂鸦房 | 绑任务 | 分身的草稿纸，结束三去向：导出/账本/蒸发 |
 | L1.5 | workbench/ 工作台 | 绑agent | 项目索引/状态桌面/记录条/复用件架/**全文检索** |
-| L2 | archive/ 档案房 | 永久 | 版本化归档，FTS检索，消化门槛（设计中） |
+| L2 | archive/ 档案房 | 永久 | 版本化归档，FTS检索，消化门槛（契约 v0.1 起草中） |
 
 共享一套mark词汇表（判断/数据/坑/待审·自/待审·人），同一本账本——**插件可拔，账本不可少。**
 
@@ -91,6 +91,25 @@ trigram分词器（SQLite 3.34+内置）按3字符滑窗切：`文件锁`、`件
 
 已知盲区：**<3字的query不进全文索引**（trigram最小粒度是3）。但不会空手而归——query不足3字时若给了type/project/agent任一过滤维度，自动降级为纯过滤查询：`workbench_search(query="坑", type="journal:坑")`列出全部坑条目，`workbench_search(query="", agent="照夜")`列出照夜写的一切。真要全文搜2字词，用过滤维度缩小范围再翻。jieba分词版留作后续可选依赖，不强加。
 
+## 账本事件契约（v0.2 正式版）
+
+工作台侧六类事件全名带七域前缀（七域：message / orchestration / threesome / approval / agent / skill / memory）：
+
+| kind | 记什么 | 不记什么 |
+|------|--------|----------|
+| threesome.workbench.new / .complete | 项目结构事件（desc / note） | — |
+| threesome.journal.write | project, file, mark（五值）, bytes, entry_head（整行前80字符） | 正文全文 |
+| threesome.journal.read | project, mark?, limit, reason?, entries | 读到的内容 |
+| threesome.journal.search | query, type?, hits（条数） | 命中内容——账本只记"发生过检索" |
+| threesome.workbench.snippet_get | name, bytes（直取=进过模型上下文） | 存入不记（写不是"模型可见"事件） |
+
+两条设计规矩，字段跟着理由走：
+
+- **entry_head 的存在性论证**：journal 会被消化cron清理，清理后账本是这条内容唯一的持久痕迹——所以记80字符。若未来确认 journal 不清理，此字段降级到 hits 同等待遇（自毁条款）。
+- **reason 必须有真实数据来源**：journal.read 的 reason 是 `workbench_read_journal` 的真实参数（如"开工仪式"），不是文档里声称的空头支票。
+
+契约全文：[docs/contract-journal-workbench-events.md](docs/contract-journal-workbench-events.md)。档案房契约 v0.1 起草中：[docs/contract-archive-events-draft.md](docs/contract-archive-events-draft.md)。
+
 ## 安装
 
 ```bash
@@ -112,7 +131,7 @@ STIGMERGY_ROOT=~/spoor python scratchpad_server.py
 
 ```bash
 STIGMERGY_ROOT=/tmp/spoor-test python tests/test_spoor_portable.py
-# === 44/44 PASS ===
+# === 58/58 PASS ===
 ```
 
 ## 设计立场
