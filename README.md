@@ -22,7 +22,7 @@ Agent的session结束，过程就蒸发了。临时文件散在/tmp，进行中�
 
 **版本回退（v0.4 新增）**：每个版本内容寻址、永不被覆盖——发现 v3 不如 v2 时，`archive_pin(doc, version_id, reason)` 把 latest 指针显式钉回 v2（reason 进账本：回退的历史证据），`archive_unpin` 撤销回落现算。版本链 list 上钉住的版本带 📌，get 拿到 pinned 版本时 head 带 `📌 pinned`（round 11）。回退不是撤销历史，是在旧版本上开新枝——v3 那支失败证据也永远留着。
 
-**断链不静默（round 11）**：pin 指向的版本行被外部损坏/手工清库时，latest 现算回落（指针坏了不能让 latest 无解），但 get 碰到断链即记 `pin_broken` 账本事件，list 回显 ⚠️——审计断链先回显后回落，同 source_ref 静默丢弃的药方。
+**断链不静默（round 11/12）**：pin 指向的版本行被外部损坏/手工清库时，latest 现算回落（指针坏了不能让 latest 无解），但 get 碰到断链即记 `pin_broken` 账本事件、list 回显 ⚠️、**get 的 head 本身带 `⚠️ pin broken (fell back)`（round 12）**——即时消费者拿到的每行都能看出是回落值，不是只能事后翻账本。审计断链先回显后回落，同 source_ref 静默丢弃的药方。
 
 共享一套mark词汇表（判断/数据/坑/待审·自/待审·人），同一本账本——**插件可拔，账本不可少。**
 

@@ -5,6 +5,7 @@
 > **round 10 终验（照照，2026-08-16）：零新发现，四条修法逐条坐实（TOCTOU 延时注入重放 rows=1 / source_ref_dropped 实测带回 / 迁移自动清重 / link 歧义回显），95/95 第二机器绿。draft 转正。**
 > v0.4 实现追加 pin/unpin 事件（a91fd99，104/104）——转正时并入本表。
 > round 11 追加 pin_broken 事件（Zcode review 中等1 落地，113/113）。
+> round 12（Zcode）：get 断链回落的 head 带显式警告 `⚠️ pin broken (fell back)`——"不静默"的对象包括正在拿数据的即时消费者，不只事后翻账本的人（115/115）。
 > 依据：DESIGN.md 档案房蓝图（照照定稿）的工具面：put / get / list / link / query（+ v0.4: pin / unpin）
 > 前置：threesome.journal.* / threesome.workbench.* 契约 v0.2 正式版（round 6 终验）
 
@@ -56,3 +57,8 @@
 - **dedup 命中时 source_ref 静默丢弃（照照中等1）**：毕业路径归档填了 source_ref 但版本已存在 → INSERT 跳过 → 溯源指针丢。修法：dedup 分支比对存量 source_ref，不一致时回显 `source_ref_dropped: true`（只在真丢了时带键）。put 事件同时新增 `dedup` 字段进账本——两次 put 同 vid 且第二次 dedup=true = 并发场景的审计铁证。
 - **archive_link 校验不查 doc（照照中等2，洄裁决：修）**：契约语义里版本是 (doc, version_id) 二元组，不修等于契约说一套代码做一套。修法：link 加可选 doc 参数——填了精确锚定二元组；不填全表校验，命中多个 doc 回显 docs 列表（歧义不吞）。links 表不加列：link 挂在内容上不挂名义（同 vid 同内容，挂哪个 doc 名义下语义等价），为洁癖抬 schema 成本不值。
 - **_conn() 重复 DDL（照照细节条，已修）**：模块级 `_inited` flag，首次建完跳过。承认这是性能洁癖不是正确性问题——但一行成本换 95 项测试里每个工具调用都少跑一遍 DDL，值。
+
+## round 12 挂账（Zcode 提出洄裁决：挂账不修）
+
+- **pin_broken 重复记账**：断链不修的话每次 get 记一条，高频 doc 刷账本。反方也成立——断链本来就该修，每条记录都是催促，且断链是罕见态（pin 的版本行只在外部损坏/手工清库时消失）。裁决：挂账不修，不为罕见态给 pins 表加状态字段。若未来断链场景变常见（如外部同步工具批量清库），重议。
+- （round 11 遗留挂账沿用：pin 的 previous 字段并发窗口——低频操作账本兜底；schema_version meta 表——第三次改表结构时再上。）

@@ -505,6 +505,12 @@ async def archive_suite():
             g_broken = await call(s, "archive_get", doc="hongxinshe")
             check("[arch][r11] 断链后 get 回落现算（最后插入行=v3）",
                   g_broken.startswith(f"(archive hongxinshe @ {v3}"), g_broken[:120])
+            # round 12（Zcode）：即时消费者可见——断链回落的 head 带显式警告
+            check("[arch][r12] 断链回落的 get head 带 ⚠️ pin broken (fell back)",
+                  "⚠️ pin broken (fell back)" in g_broken.splitlines()[0], g_broken[:150])
+            # 非断链路径不受污染：显式取版本不带警告（broken 只在指针解析路径出现）
+            check("[arch][r12] 显式 version_id 取版本不带 pin broken 警告",
+                  "⚠️ pin broken" not in g_v3.splitlines()[0], g_v3[:100])
             led_r11 = []
             for l in Path(ROOT, "ledger.jsonl").read_text(encoding="utf-8").strip().splitlines():
                 try:
