@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """session-spoor v0.2 回归测试：stdio transport 全工具 + v0.2 新契约。"""
-import asyncio, json, os, shutil, sys, tempfile, traceback
+import asyncio, json, os, shutil, sqlite3, sys, tempfile, traceback
 from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -276,6 +276,120 @@ async def workbench_suite():
             idx2 = Path(ROOT, "workbench/INDEX.md").read_text(encoding="utf-8")
             check("INDEX.md after complete", "✅完成" in idx2, idx2[:150])
 
+ARCHIVE_SERVER = _find("archive_server.py")
+
+
+async def archive_suite():
+    """档案房 v0.2 契约（照照 round 7 裁决后）：五工具面 + 记账纪律。"""
+    params = StdioServerParameters(
+        command=VENV_PY, args=[ARCHIVE_SERVER],
+        env={"STIGMERGY_ROOT": ROOT, "PATH": "/usr/bin:/bin"},
+    )
+    async with stdio_client(params) as (r, w):
+        async with ClientSession(r, w) as s:
+            await s.initialize()
+            lt = await s.list_tools()
+            check("archive tools listed", len(lt.tools) == 5,
+                  str([t.name for t in lt.tools]))
+
+            # ---- put：内容寻址 + DAG + source_ref ----
+            p1 = json.loads(await call(s, "archive_put", doc="hongxinshe",
+                                       content="# 世界观 v1\n\n架空明末背景。\n"))
+            check("[arch] put v1 ok", p1.get("ok") and len(p1["version_id"]) == 12, p1)
+            v1 = p1["version_id"]
+            p2 = json.loads(await call(s, "archive_put", doc="hongxinshe",
+                                       content="# 世界观 v2\n\n架空明末背景，江南丝织业。\n",
+                                       parent_version=v1, source_ref="ledger:export:42"))
+            check("[arch] put v2 with parent+source_ref ok", p2.get("ok") and not p2.get("dedup"), p2)
+            v2 = p2["version_id"]
+            pd = json.loads(await call(s, "archive_put", doc="hongxinshe",
+                                       content="# 世界观 v1\n\n架空明末背景。\n"))
+            check("[arch] dedup same content same vid", pd.get("ok") and pd.get("dedup") and pd["version_id"] == v1, pd)
+            pe = json.loads(await call(s, "archive_put", doc="hongxinshe",
+                                       content="# 世界观 v3\n", parent_version="deadbeef0000"))
+            check("[arch] bad parent rejected", pe.get("ok") is False and "parent" in pe["error"], pe)
+            pbad = json.loads(await call(s, "archive_put", doc="不良 名字", content="x"))
+            check("[arch] invalid doc name rejected", pbad.get("ok") is False, pbad)
+
+            # ---- get：latest 指针 + 指定版本 + reason 进账本 ----
+            g1 = await call(s, "archive_get", doc="hongxinshe")
+            check("[arch] get latest resolves v2", "江南丝织业" in g1 and v2 in g1, g1[:100])
+            g2 = await call(s, "archive_get", doc="hongxinshe", version_id=v1)
+            check("[arch] get explicit v1", "架空明末背景" in g2 and v1 in g2, g2[:100])
+            gn = await call(s, "archive_get", doc="no-such-doc")
+            check("[arch] get missing doc → JSON error", json.loads(gn).get("ok") is False, gn[:80])
+
+            # ---- list：地址导航，不记账 ----
+            l1 = await call(s, "archive_list")          # 全库
+            l2 = await call(s, "archive_list", doc="hongxinshe")  # 单链
+            check("[arch] list all docs", "hongxinshe" in l1 and "1 docs" in l1, l1[:120])
+            check("[arch] list doc chain newest first", v2 in l2 and v1 in l2 and l2.find(v2) < l2.find(v1), l2[:160])
+
+            # ---- link：Tideline 指针 ----
+            lk = json.loads(await call(s, "archive_link", from_version=v2,
+                                       to_uri="tideline://memory/abc123", relation="same_story"))
+            check("[arch] link ok", lk.get("ok"), lk)
+            lkb = json.loads(await call(s, "archive_link", from_version="deadbeef0000",
+                                        to_uri="x://y", relation="r"))
+            check("[arch] link bad from_version rejected", lkb.get("ok") is False, lkb)
+
+            # ---- query：FTS 检索 + 记账条数 ----
+            q1 = await call(s, "archive_query", query="丝织业")
+            check("[arch] FTS hits content", "hongxinshe" in q1 and v2 in q1, q1[:120])
+            q2 = await call(s, "archive_query", query="不存在的词组xyzq")
+            check("[arch] FTS no-hit path", "no hits" in q2, q2)
+            q3 = await call(sub := s, "archive_query", query="ab")  # <3字
+            check("[arch] query <3 chars → trigram notice", "trigram" in q3, q3)
+
+            # ---- 账本纪律断言（契约核心）----
+            led_lines = Path(ROOT, "ledger.jsonl").read_text(encoding="utf-8").strip().splitlines()
+            parsed = []
+            for l in led_lines:
+                try:
+                    parsed.append(json.loads(l))
+                except json.JSONDecodeError:
+                    pass
+            arch_evts = [e for e in parsed if str(e.get("event", "")).startswith("threesome.archive.")]
+            kinds = [e["event"] for e in arch_evts]
+            check("[arch] ledger has all 4 archive event kinds",
+                  {"threesome.archive.put", "threesome.archive.get",
+                   "threesome.archive.link", "threesome.archive.query"} <= set(kinds), str(kinds))
+            put_evts = [e for e in arch_evts if e["event"] == "threesome.archive.put"]
+            check("[arch] put 不记 entry_head（自毁条款第一次应用）",
+                  all("entry_head" not in e for e in put_evts), str(put_evts[:1]))
+            check("[arch] put 记 source_ref 且毕业路径才有",
+                  any(e.get("source_ref") == "ledger:export:42" for e in put_evts)
+                  and sum(1 for e in put_evts if e.get("source_ref")) == 1,
+                  str([e.get("source_ref") for e in put_evts]))
+            get_evts = [e for e in arch_evts if e["event"] == "threesome.archive.get"]
+            check("[arch] get 记 bytes+reason", all("bytes" in e for e in get_evts) and any(e.get("reason") is None for e in get_evts), str(get_evts[:1]))
+            # list 不记账：l1/l2 之前记一次"base count"，之后不再新增 archive.list 事件
+            n_list_before = len([e for e in arch_evts if e["event"] == "threesome.archive.list"])
+            check("[arch] list 从不记账（总则不变量）", n_list_before == 0, str(n_list_before))
+
+            # ---- 反自我放大：list/query 后账本 archive 事件数只增 query ----
+            await call(s, "archive_list")
+            await call(s, "archive_list", doc="hongxinshe")
+            arch_after = []
+            for l in Path(ROOT, "ledger.jsonl").read_text(encoding="utf-8").strip().splitlines():
+                try:
+                    e = json.loads(l)
+                except json.JSONDecodeError:
+                    continue  # 套件注入的脏行（两处parse同守）
+                if str(e.get("event", "")).startswith("threesome.archive."):
+                    arch_after.append(e)
+            check("[arch] list 调用后 archive 事件零增加",
+                  len(arch_after) - len(arch_evts) == 0, f"{len(arch_evts)}→{len(arch_after)}")
+
+            # ---- 追加性验证：坏版本被拒后 DB 无痕 ----
+            # versions=2（v1+v2；dedup 不 INSERT 第二行是设计：内容寻址，同一内容=同一版本）
+            c = sqlite3.connect(Path(ROOT, "archive", "index.db"))
+            n = c.execute("SELECT COUNT(*) FROM versions WHERE doc='hongxinshe'").fetchone()[0]
+            link_rows = c.execute("SELECT COUNT(*) FROM links").fetchone()[0]
+            c.close()
+            check("[arch] rejected put/link leaves no DB trace",
+                  n == 2 and link_rows == 1, f"versions={n} links={link_rows}")
+
 async def windows_sim_suite():
     """Windows模拟（照照round-4方法）：sys.modules['fcntl']=None 拦截fcntl，
     两个server必须仍能启动握手——v0.3顶层 import fcntl 在Windows上import即死。"""
@@ -308,7 +422,7 @@ async def windows_sim_suite():
 
 async def main():
     for name, suite in [("scratch", scratch_suite), ("workbench", workbench_suite),
-                        ("win-sim", windows_sim_suite)]:
+                        ("archive", archive_suite), ("win-sim", windows_sim_suite)]:
         try:
             await suite()
         except Exception as e:

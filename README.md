@@ -2,7 +2,7 @@
 
 **Every session leaves a trail.**
 
-Agent干活的痕迹管理系统——MCP工具集，三层结构：涂鸦房（临时工草稿，用完即弃）、工作台（主agent常驻手稿，带全文检索）、档案房（项目归档，版本化——契约 v0.1 起草中）。
+Agent干活的痕迹管理系统——MCP工具集，三层结构：涂鸦房（临时工草稿，用完即弃）、工作台（主agent常驻手稿，带全文检索）、档案房（项目归档，版本化——契约 v0.2 已实现）。
 
 ## 为什么
 
@@ -18,7 +18,7 @@ Agent的session结束，过程就蒸发了。临时文件散在/tmp，进行中�
 |---|---|---|---|
 | L1 | scratch/ 涂鸦房 | 绑任务·无定时器 | 分身的草稿纸，结束显式清理，三去向：导出/账本/蒸发 |
 | L1.5 | workbench/ 工作台 | 绑agent | 项目索引/状态桌面/记录条/复用件架/**全文检索** |
-| L2 | archive/ 档案房 | 永久 | 版本化归档，FTS检索，消化门槛（契约 v0.1 起草中） |
+| L2 | archive/ 档案房 | 永久 | 版本化归档，FTS检索，消化门槛（契约 v0.2 已实现） |
 
 共享一套mark词汇表（判断/数据/坑/待审·自/待审·人），同一本账本——**插件可拔，账本不可少。**
 
@@ -85,6 +85,24 @@ workbench_search(query="表结构", project="portalk")    # 单项目内搜
 
 索引对象：journal每条记录（行级，带mark/agent解析）、snippet、design、STATUS、description、scratch文本文件。增量维护——按`(path, mtime)`记忆，变更才重扫，搜索时自动更新，无需手动reindex。
 
+## 档案房（v0.4新增——契约 v0.2 已实现）
+
+版本化永久归档，五工具面：`archive_put` / `archive_get` / `archive_list` / `archive_link` / `archive_query`。
+
+```
+archive_put(doc="hongxinshe", content="...", parent_version=v1, source_ref="ledger:export:42")
+archive_get(doc="hongxinshe")                    # latest（现算指针）
+archive_get(doc="hongxinshe", version_id=v1)     # 指定版本，含 parent/source_ref 头
+archive_list()                                   # 地址导航：全库/单链（不记账）
+archive_link(from_version=v2, to_uri="tideline://...", relation="same_story")
+archive_query(query="丝织业")                     # FTS 检索（记条数不记内容）
+```
+
+- **version_id = sha256 前 12 位，内容寻址**：同一内容=同一版本（dedup 不 INSERT，但 put 事件照记账——账本记事件不记状态）。
+- **append-only**：档案不改不删，修复也是新版本——账本里永远看得到走过弯路。latest 是指针不是版本（现算，不落盘）。
+- **source_ref**（照照 round 7）：毕业路径归档填（涂鸦房导出→归档的账本链路），直归档不填。账本管发生过什么，source_ref 管"这两个事件是同一件事"。
+- **记账纪律**：get/query 记账（内容进过模型上下文）；list 不记账（地址≠内容，总则不变量）；put 不记 entry_head（永久层，自毁条款第一次应用）。
+
 ### 为什么是trigram
 
 SQLite默认的unicode61分词器对连续CJK文本**整段切成一个token**——"文件锁在Windows上"变一个词，任何中文查询都是0命中。这是我们实测确诊的，不是文档里抄的。
@@ -110,7 +128,7 @@ trigram分词器（SQLite 3.34+内置）按3字符滑窗切：`文件锁`、`件
 - **entry_head 的存在性论证**：journal 会被消化cron清理，清理后账本是这条内容唯一的持久痕迹——所以记80字符。若未来确认 journal 不清理，此字段降级到 hits 同等待遇（自毁条款）。
 - **reason 必须有真实数据来源**：journal.read 的 reason 是 `workbench_read_journal` 的真实参数（如"开工仪式"），不是文档里声称的空头支票。
 
-契约全文：[docs/contract-journal-workbench-events.md](docs/contract-journal-workbench-events.md)。档案房契约 v0.1 起草中：[docs/contract-archive-events-draft.md](docs/contract-archive-events-draft.md)。
+契约全文：[docs/contract-journal-workbench-events.md](docs/contract-journal-workbench-events.md)。档案房契约 v0.2（round 7 裁决后，已实现）：[docs/contract-archive-events-draft.md](docs/contract-archive-events-draft.md)。
 
 ## 安装
 
@@ -133,7 +151,7 @@ STIGMERGY_ROOT=~/spoor python scratchpad_server.py
 
 ```bash
 STIGMERGY_ROOT=/tmp/spoor-test python tests/test_spoor_portable.py
-# === 58/58 PASS ===
+# === 89/89 PASS ===
 ```
 
 ## 设计立场
