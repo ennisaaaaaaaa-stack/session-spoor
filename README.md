@@ -130,7 +130,7 @@ trigram分词器（SQLite 3.34+内置）按3字符滑窗切：`文件锁`、`件
 - **entry_head 的存在性论证**：journal 会被消化cron清理，清理后账本是这条内容唯一的持久痕迹——所以记80字符。若未来确认 journal 不清理，此字段降级到 hits 同等待遇（自毁条款）。
 - **reason 必须有真实数据来源**：journal.read 的 reason 是 `workbench_read_journal` 的真实参数（如"开工仪式"），不是文档里声称的空头支票。
 
-契约全文：[docs/contract-journal-workbench-events.md](docs/contract-journal-workbench-events.md)。档案房契约 v0.2（round 7 裁决后，已实现）：[docs/contract-archive-events-draft.md](docs/contract-archive-events-draft.md)。
+契约全文：[docs/contract-journal-workbench-events.md](docs/contract-journal-workbench-events.md)。档案房契约 v0.2（round 7 裁决后，已实现）：[docs/contract-archive-events.md](docs/contract-archive-events.md)。
 
 ## 安装
 
