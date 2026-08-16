@@ -61,7 +61,7 @@ journal是读-改-写，ledger是追加——多进程同时写会交错。`spoo
 
 压测：8进程×20轮并发写，journal 160/160、ledger 160/160，零丢失。
 
-注意：`fcntl`是POSIX的。Windows上`flock`不可用，锁层自动退化裸写——单agent无影响，Windows多agent共享暂不支持（要支持的话msvcrt.locking是路，欢迎PR）。两个server在Windows上正常启动和单agent使用（v0.3.1修复：此前`import fcntl`在模块顶层直接炸，退化逻辑永远执行不到）。
+注意：锁层按平台分派——POSIX用`fcntl.flock`，Windows用`msvcrt.locking`（zcode PR）。**Windows多agent共享自本版起可用**：journal的读→拼→写在锁内串行。丢失更新实证（两进程并发`append_journal`各100条×5轮，屏障对齐首建竞态）：锁版200/200×5全对，修复前的裸写100–102/200——**静默丢半**。锁等待上限`LK_LOCK` 10次×1s，超时报错可重试，不静默裸写。已知过度互斥（沿POSIX旧语义不改）：锁名取文件名不含目录，不同project的同日journal互相排队——家庭规模无感。两个server在Windows上正常启动和单agent使用（v0.3.1修复：此前`import fcntl`在模块顶层直接炸，退化逻辑永远执行不到）。
 
 ### 跨机器同步
 
