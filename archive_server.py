@@ -256,6 +256,10 @@ def archive_get(doc: str, version_id: str = "", reason: str = "") -> str:
     head = f"(archive {doc} @ {vid} · {b}B · parent {parent or '—'} · {ts}"
     if pinned:
         head += " · 📌 pinned"
+    if broken:
+        # round 12（Zcode）："不静默"的对象包括正在拿数据的人——即时消费者
+        # 必须能看出这行是断链回落值，不是只能事后翻账本。
+        head += " · ⚠️ pin broken (fell back)"
     if source_ref:
         head += f" · source_ref {source_ref}"
     return head + ")\n\n" + content
