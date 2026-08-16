@@ -155,8 +155,10 @@ STIGMERGY_ROOT=~/spoor python scratchpad_server.py
 
 ```bash
 STIGMERGY_ROOT=/tmp/spoor-test python tests/test_spoor_portable.py
-# === 89/89 PASS ===
+# === 123/123 PASS ===
 ```
+
+验收线是双平台绿：Linux（作者机）+ Windows（第二台CI，真机）各跑一遍，同一句话两边都过才算过。
 
 ## 设计立场
 
