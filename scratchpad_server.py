@@ -328,8 +328,18 @@ def scratchpad_cleanup(space_id: str, mode: str = "export_marked", dest: str = "
 # (照照验证: FastMCP 1.28.1 无 mcp.tools 属性——原写法启动即AttributeError。
 #  正确路径是 ToolManager._tools，但更稳的是替换 .fn，两处均已实测可行。
 #  这里用装饰器内层套法替代——见各工具定义处 @_json_safe)
+_wrapped = 0
 for _t in getattr(getattr(mcp, "_tool_manager", None), "_tools", {}).values():
     _t.fn = _json_safe(_t.fn)
+    _wrapped += 1
+# r14（zcode review）：mcp 私有 API 静默失效面——_tool_manager._tools 路径一旦
+# 在未来版本变更，上面循环会零命中静默跳过，错误契约无声失效（静默断链族）。
+# 让"失效"本身不可能静默：零命中即启动失败，错误在部署时暴露不在运行时。
+if _wrapped == 0:
+    raise RuntimeError(
+        "错误契约包装零命中：FastMCP 内部结构已变更（_tool_manager._tools 不可用），"
+        "工具异常将以非 JSON 形态抛出。请升级 session-spoor 或检查 mcp 版本兼容性。"
+    )
 
 if __name__ == "__main__":
     mcp.run()

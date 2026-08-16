@@ -333,8 +333,16 @@ def _json_safe(fn):
 
 # (照照验证: FastMCP 1.28.1 无 mcp.tools 属性——原写法启动即AttributeError。
 #  正确路径是 ToolManager._tools，替换 .fn 已实测可行：schema 正常、异常转JSON。)
+_wrapped = 0
 for _t in getattr(getattr(mcp, "_tool_manager", None), "_tools", {}).values():
     _t.fn = _json_safe(_t.fn)
+    _wrapped += 1
+# r14（zcode review）：包装零命中即启动失败——静默失效面必须在部署时暴露
+if _wrapped == 0:
+    raise RuntimeError(
+        "错误契约包装零命中：FastMCP 内部结构已变更（_tool_manager._tools 不可用），"
+        "工具异常将以非 JSON 形态抛出。请升级 session-spoor 或检查 mcp 版本兼容性。"
+    )
 
 if __name__ == "__main__":
     mcp.run()

@@ -22,6 +22,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+import spoor_common  # r14: sqlite 地板诊断
+
 ROOT = Path(os.environ.get("STIGMERGY_ROOT", str(Path.home() / "Stigmergy")))
 DB = ROOT / ".search" / "index.db"
 
@@ -37,6 +39,7 @@ CREATE TABLE IF NOT EXISTS file_state (
 
 
 def _conn() -> sqlite3.Connection:
+    spoor_common.check_sqlite_floor()  # r14: trigram 地板，老库给人话诊断
     DB.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(DB)
     c.executescript(_SCHEMA)

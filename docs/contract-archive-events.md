@@ -72,3 +72,13 @@ zcode 在甜心的 Windows 机上跑了全量套件：sqlite3 3.50.4 ✓，111/1
 - **挂账（洄裁决：不修）**：get 读文件不校验内容哈希——外部篡改会静默服务错内容（r11 把外部损坏纳入威胁模型后算同族）。sha256 微秒级，但读路径加不加校验是成本裁量，挂账。若档案房开始承载"被引用即需完整"的场景，重议。
 - **zcode 真机验证**：sqlite3 3.50.4（Windows 自带 Python 的 sqlite3 模块）≥3.34，trigram FTS 全绿——契约里"zcode 真机仍需验 sqlite3 ≥3.34"自此关闭。
 - （round 11 遗留挂账沿用：pin 的 previous 字段并发窗口——低频操作账本兜底；schema_version meta 表——第三次改表结构时再上。）
+
+## round 14 落地（Zcode 真机复核 + 两条存疑的裁决）
+
+zcode 真机复核 r13 修复：122/123，唯一失败项是探针自己的假阳性——守卫一个字节都没漏。`not Path("C:").exists()` 在 POSIX 是"没有字面量 C: 目录"，在 Windows 是"C盘存在吗"恒 False，这条断言在 Windows 上永远不可能绿。**双平台探针必须问同一句话。**
+
+- **落地（本轮已修）**：探针改唯一名 + 真实落点——`/spoor-probe-r14/passwd`、`\\spoor-probe-r14\x.md`、`C:/spoor-probe-r14.md`，落点断言查本机真实 anchor（POSIX `/`、Windows 盘根）下的唯一名文件。两个平台从此跑的是同一句话，双平台绿才算绿。
+- **落地（本轮已修，zcode 存疑1采纳）**：SQLite ≥3.34 硬地板从"响亮的 OperationalError"升级为"人话 RuntimeError"——`spoor_common.check_sqlite_floor()` 统一前置到三处 `_conn()`（archive、search 两库）。老 Python 捆的老 sqlite 首次初始化时给出可执行诊断：升级 Python、数据无需迁移。负路径已验：伪装 3.31 触发，人话全文回显。
+- **落地（本轮已修，zcode 存疑2采纳）**：_json_safe 包装循环加零命中守卫——mcp 私有 API（_tool_manager._tools）未来改名时，旧循环静默跳过、错误契约无声失效（静默断链族）。现在零命中即启动失败，错误在部署时暴露不在运行时。负路径已验：模拟 _tools 改名场景，RuntimeError 带诊断全文触发；mcp 真实结构未动。
+- **zcode 自领的账**：ta 承认 Windows 真机验证了全部向量但没意识到同一份数据会被另一平台读取端重新解析——"数据要去哪里，就以哪里的眼睛看它"。和 r13 双视角守卫同一个形状。
+- （r13 挂账沿用：get 读文件不校验内容哈希；pin previous 并发窗口；schema_version meta 表。）

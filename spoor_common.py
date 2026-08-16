@@ -28,6 +28,23 @@ LEDGER = ROOT / "ledger.jsonl"
 LOCKDIR = ROOT / ".locks"
 
 
+# ---- round 14（zcode review）：SQLite 硬地板的可执行诊断 ----
+# trigram 分词器需要 SQLite ≥ 3.34。老 Python 捆的老 sqlite 上首次建表
+# 就是 OperationalError——响亮但不是人话。这里把版本检查提前到 _conn，
+# 给出能直接行动的诊断。（zcode 裁决：报错要像人说话）
+SQLITE_FLOOR = (3, 34)
+
+
+def check_sqlite_floor() -> None:
+    import sqlite3
+    if sqlite3.sqlite_version_info < SQLITE_FLOOR:
+        raise RuntimeError(
+            f"sqlite3 过老（{sqlite3.sqlite_version} < 3.34）：FTS5 trigram 分词器不可用，"
+            f"索引/档案库无法初始化。请升级 Python（或其捆绑的 SQLite）后重试，"
+            f"数据文件本身无需迁移。"
+        )
+
+
 def agent_name() -> str:
     """当前住户名。空 = 匿名（单住户模式）。
 
