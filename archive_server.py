@@ -456,12 +456,15 @@ def archive_unpin(doc: str, reason: str = "") -> str:
         return json.dumps({"ok": False, "error": f"invalid doc name: {doc!r}"})
     c = _conn()
     try:
-        if not c.execute("SELECT 1 FROM versions WHERE doc=?", (doc,)).fetchone():
-            return json.dumps({"ok": False, "error": f"no versions: {doc}"})
         had_pin = c.execute("SELECT version_id FROM pins WHERE doc=?", (doc,)).fetchone()
         if had_pin:
+            # r13(zcode): pins 检查提到 no-versions 守卫之前——版本行整批被清、pin 残留的
+            # 外部损坏态（r11 处理的同族），unpin 本该是唯一清除路径，却被守卫挡死：
+            # pins 行永留 → 每次 get 都刷 pin_broken。unpin 只是指针变更，有 pin 就允许清。
             c.execute("DELETE FROM pins WHERE doc=?", (doc,))
             c.commit()
+        elif not c.execute("SELECT 1 FROM versions WHERE doc=?", (doc,)).fetchone():
+            return json.dumps({"ok": False, "error": f"no versions: {doc}"})
         prev, _broken = _latest_row(c, doc)
         current = prev[1] if prev else None
         _ledger({"event": "threesome.archive.unpin", "doc": doc,

@@ -24,7 +24,7 @@ import os
 import shutil
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 # FastMCP
 from mcp.server.fastmcp import FastMCP
@@ -61,13 +61,19 @@ def _space_path(space_id: str) -> Path:
 
 def _safe_rel(path: str) -> Path:
     rel = Path(path)
-    if rel.is_absolute() or ".." in rel.parts:
+    # Windows 陷阱（r13/zcode）：Path("/etc/x").is_absolute() 在 nt 语义下 False（有根无盘符），
+    # 之后 base / rel 的 join 语义丢弃整个 base → 读写双向逃逸出沙箱。
+    # 双视角检查：本机 Path 只按本平台语义解析，PureWindowsPath 补上 Windows 视角——
+    # POSIX 写入的 "C:/x" 在本机是字面量目录，同步到 Windows 读取端即成盘符逃逸向量。
+    win = PureWindowsPath(path)
+    if (rel.is_absolute() or rel.drive or rel.root or ".." in rel.parts
+            or win.drive or win.root or ".." in win.parts):
         raise ValueError(f"path must be relative inside space: {path!r}")
     return rel
 
 
 def _marks_path(space: Path, target: Path) -> Path:
-    return space / ".marks" / (str(target) + ".marks.json")
+    return space / ".marks" / (target.as_posix() + ".marks.json")
 
 
 def _load_marks(space: Path, target: Path) -> dict:
@@ -100,7 +106,7 @@ def _bundle_md(space: Path, files: list[Path]) -> str:
     for f in files:
         m = _load_marks(space, f.relative_to(space))
         best = min((RANK[mk] for mk in m["marks"] if mk in RANK), default=99)
-        ranked.append((best, str(f.relative_to(space)), m, f))
+        ranked.append((best, f.relative_to(space).as_posix(), m, f))
     ranked.sort(key=lambda x: x[0])
     for _, relname, m, f in ranked:
         marks = "/".join(m["marks"]) if m["marks"] else "-"
@@ -164,7 +170,7 @@ def scratchpad_write(space_id: str, path: str, content: str, mode: str = "overwr
             f.write(content)
     else:
         target.write_text(content, encoding="utf-8")
-    return json.dumps({"ok": True, "path": str(rel), "bytes": len(content.encode())})
+    return json.dumps({"ok": True, "path": rel.as_posix(), "bytes": len(content.encode())})
 
 
 @mcp.tool()
@@ -192,7 +198,7 @@ def scratchpad_list(space_id: str, path: str = "") -> str:
         if f.is_file():
             m = _load_marks(space, f.relative_to(space))
             entries.append({
-                "file": str(f.relative_to(space)),
+                "file": f.relative_to(space).as_posix(),
                 "bytes": f.stat().st_size,
                 "marks": m["marks"],
                 "exported": m["exported"],
@@ -215,7 +221,7 @@ def scratchpad_mark(space_id: str, path: str, mark: str) -> str:
     if mark not in m["marks"]:
         m["marks"].append(mark)
         _save_marks(space, rel, m)
-    return json.dumps({"ok": True, "path": str(rel), "marks": m["marks"]})
+    return json.dumps({"ok": True, "path": rel.as_posix(), "marks": m["marks"]})
 
 
 @mcp.tool()
@@ -307,7 +313,7 @@ def scratchpad_cleanup(space_id: str, mode: str = "export_marked", dest: str = "
         if not dest:
             return json.dumps({"ok": False, "error": "dest required for export modes"})
         sel = "marked" if mode == "export_marked" else json.dumps(
-            [str(f.relative_to(space)) for f in sorted(space.rglob("*"))
+            [f.relative_to(space).as_posix() for f in sorted(space.rglob("*"))
              if f.is_file() and ".marks" not in f.parts])
         r = json.loads(scratchpad_export(space_id, sel, dest))
         exported = r.get("exported", 0)

@@ -20,7 +20,7 @@ Dying Will (dependency declaration — forces one ppid thought at write time):
 import json
 import os
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from mcp.server.fastmcp import FastMCP
 
@@ -59,7 +59,12 @@ def _proj(name: str) -> Path:
 
 def _safe_rel(path: str) -> Path:
     rel = Path(path)
-    if rel.is_absolute() or ".." in rel.parts:
+    # Windows 陷阱（r13/zcode）：Path("/etc/x").is_absolute() 在 nt 语义下 False（有根无盘符），
+    # 之后 base / rel 的 join 语义丢弃整个 base → 读写双向逃逸出沙箱。
+    # 双视角检查：PureWindowsPath 补上 Windows 视角（POSIX 字面量 "C:/x" 同步到 Windows 即逃逸）。
+    win = PureWindowsPath(path)
+    if (rel.is_absolute() or rel.drive or rel.root or ".." in rel.parts
+            or win.drive or win.root or ".." in win.parts):
         raise ValueError(f"path must be relative inside project: {path!r}")
     return rel
 
@@ -238,7 +243,7 @@ def workbench_search(query: str, type: str = "", project: str = "", agent: str =
     def _rel(p: str) -> str:
         # Windows 分隔符是 \，字符串 split('workbench/') 会失效——用 Path 语义
         try:
-            return str(Path(p).relative_to(WB))
+            return Path(p).relative_to(WB).as_posix()
         except ValueError:
             return p
     return "\n".join(
