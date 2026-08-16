@@ -58,7 +58,7 @@ async def scratch_suite():
             check("[v0.2] escape error is JSON {ok:false}", ok1, e1[:150])
             check("no file escaped", not Path(ROOT, "evil.md").exists(), "")
 
-            e2 = await call(s, "scratchpad_write", space_id=sid, path="/etc/passwd", content="x")
+            e2 = await call(s, "scratchpad_write", space_id=sid, path="/spoor-probe-r14/passwd", content="x")
             try:
                 j2 = json.loads(e2); ok2 = j2.get("ok") is False
             except Exception: ok2 = False
@@ -67,21 +67,26 @@ async def scratch_suite():
             # ---- round 13（Zcode review）：Windows/nt 语义的路径逃逸 ----
             # Path("/etc/x").is_absolute() 在 nt 语义下 False（有根无盘符），join 丢 base → 双向逃逸。
             # 纯 POSIX 跑这里两个向量都已在 absolute 拦截，但断言守卫向量齐全——CI 全绿≠Windows安全。
-            e2r = await call(s, "scratchpad_write", space_id=sid, path="\\\\etc\\passwd", content="x")
+            # r14（zcode review）：探针改真实落点+唯一探针名——旧子句 not Path("C:").exists()
+            # 在 Windows 上=「C盘存在吗」恒 False→恒失败；/etc/passwd 在 POSIX 是真实系统文件→反向假阳性。
+            e2r = await call(s, "scratchpad_write", space_id=sid, path="\\\\spoor-probe-r14\\\\x.md", content="x")
             try:
                 j2r = json.loads(e2r); ok2r = j2r.get("ok") is False and "must be relative" in j2r.get("error", "")
             except Exception: ok2r = False
             check("[v0.2][r13] rooted path (no drive) rejected on any platform semantics",
                   ok2r, e2r[:150])
-            e2d = await call(s, "scratchpad_write", space_id=sid, path="C:/evil.md", content="x")
+            e2d = await call(s, "scratchpad_write", space_id=sid, path="C:/spoor-probe-r14.md", content="x")
             try:
                 j2d = json.loads(e2d); ok2d = j2d.get("ok") is False and "must be relative" in j2d.get("error", "")
             except Exception: ok2d = False
-            check("[v0.2][r13] drive-absolute path (C:/evil.md) rejected on any platform",
+            check("[v0.2][r13] drive-absolute path (C:/spoor-probe-r14.md) rejected on any platform",
                   ok2d, e2d[:150])
-            check("[v0.2][r13] no rooted/drive file landed outside space",
-                  not Path(ROOT, "etc/passwd").exists() and not Path("C:").exists()
-                  and not Path(ROOT, "evil.md").exists(), "")
+            # r14 探针：两平台问同一句话——查本机真实根（POSIX:"/" Windows:"C:\"）下有没有唯一名落点
+            _anchor = Path(ROOT).anchor
+            check("[v0.2][r13][r14] no escape landed at real fs anchor (same sentence both platforms)",
+                  not Path(_anchor, "spoor-probe-r14", "x.md").exists()
+                  and not Path(_anchor, "spoor-probe-r14.md").exists()
+                  and not Path(_anchor, "spoor-probe-r14", "passwd").exists(), str(_anchor))
 
             e3 = await call(s, "scratchpad_read", space_id=f"{sid}/../..", path="ledger.jsonl")
             try:
