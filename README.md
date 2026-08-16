@@ -1,6 +1,6 @@
 # session-spoor · 猎迹
 
-**Every session leaves a trail.**
+**Sessions die. Trails don't.**
 
 Agent干活的痕迹管理系统——MCP工具集，三层结构：涂鸦房（临时工草稿，用完即弃）、工作台（主agent常驻手稿，带全文检索）、档案房（项目归档，版本化——契约 v0.2 已实现）。
 
