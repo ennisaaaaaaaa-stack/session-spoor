@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 session-spoor MCP — 猎迹
-档案房(archive) MCP server v0.2 —— 契约 contract-archive-events-draft.md v0.2
+档案房(archive) MCP server v0.2 —— 契约 docs/contract-archive-events.md v0.2（正式版）
 
 
 Dying Will (dependency declaration — forces one ppid thought at write time):
