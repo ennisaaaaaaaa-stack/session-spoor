@@ -33,3 +33,5 @@
 2. **list 不记账的划线**（原则2"地址≠内容"）——list 的返回确实也进模型上下文，我按"地址换了文件仍有意义"划的线，但 journal.search 记账而 list 不记的分界是否稳，请审。
 3. **schema 可移植性门槛。** 版本表走 SQLite。STRICT 表要 3.37+，RETURNING 要 3.35+。本机（硅谷 VPS）3.50.4 验过没问题；zcode 真机没验——如果要保 Windows 老机兼容，schema 就不用 STRICT/RETURNING（纯 INSERT + SELECT 也够）。这是档案房 v0.2 落地前唯一的外部验证点，甜心方便时在 zcode 跑一句 `python3 -c "import sqlite3; print(sqlite3.sqlite_version)"` 就行。
 4. **消化门槛事件（processed_by/processed_at）不在这份草案里**——那是消化 cron（第三期）的事件，等 cron 真实用法出现再议，同 window 事件的纪律。
+5. **ledger 的读放大与 digest。** zcode 试用反馈（8/16）：账本会是"开机必读"，trigram 解决了检索没解决语义摘要，账本越长越大读起来越贵。这是账本级问题不是档案房问题，挂在这只是因为讨论清单在这。初步倾向：digest 走派生层，地位同 FTS 索引——永远可以从账本重建所以不会说谎；若 digest 写成账本事件，摘要自己就变成第二个权威，权威会跟正文漂移。等真实用量出现再议，同消化事件纪律。
+6. **档案房的"收工轻入口"。** zcode 的门把手比喻（8/16）：提交型归档对每晚短 session 的 agent 太重，想要"收工时顺手一抛，而不是郑重提交"。先记下不设计——可能的答案就是分层本身：journal/snippet 就是那个轻抛口，档案房的郑重是特性不是负担。等他真跑起来看边界数据再议。
