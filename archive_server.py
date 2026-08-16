@@ -119,9 +119,20 @@ def _vid(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
 
 
+def _pin_vid(c: sqlite3.Connection, doc: str):
+    """doc 当前 pin 的版本号；没钉过返回 None。（round 11 抽出——get/list 三处共用）"""
+    r = c.execute("SELECT version_id FROM pins WHERE doc=?", (doc,)).fetchone()
+    return r[0] if r else None
+
+
 def _latest_row(c: sqlite3.Connection, doc: str):
     """latest 是指针不是版本：显式 pin 优先；无 pin 现算（最后插入的一行）。不落盘指的是
-    不为现算结果单写一行——pin 是用户显式声明的指针，落 pins 表。"""
+    不为现算结果单写一行——pin 是用户显式声明的指针，落 pins 表。
+
+    round 11（Zcode review 中等1）：pin 存在但版本行查不到（外部损坏/手工清库）时，
+    返回 (现算行, broken_pin=True)——回落照旧（不能因为指针坏了让 latest 无解），
+    但不再静默：调用方负责记 pin_broken 账本事件（同 round 6 source_ref 静默丢弃的药方：
+    断链审计先回显后回落）。返回 (row, broken_pin) 二元组，row 可能为 None（doc 无任何版本）。"""
     pin = c.execute("SELECT version_id FROM pins WHERE doc=?", (doc,)).fetchone()
     if pin:
         row = c.execute(
@@ -129,11 +140,18 @@ def _latest_row(c: sqlite3.Connection, doc: str):
             " WHERE doc=? AND version_id=?", (doc, pin[0])
         ).fetchone()
         if row:
-            return row
-    return c.execute(
+            return row, False
+        # pin 指向的版本行不存在——断链。回落现算，但带上断链信号。
+        row = c.execute(
+            "SELECT doc, version_id, parent, bytes, source_ref, ts FROM versions"
+            " WHERE doc=? ORDER BY rowid DESC LIMIT 1", (doc,)
+        ).fetchone()
+        return row, True
+    row = c.execute(
         "SELECT doc, version_id, parent, bytes, source_ref, ts FROM versions"
         " WHERE doc=? ORDER BY rowid DESC LIMIT 1", (doc,)
     ).fetchone()
+    return row, False
 
 
 # ---------- MCP 工具 ----------
@@ -211,9 +229,18 @@ def archive_get(doc: str, version_id: str = "", reason: str = "") -> str:
                 "SELECT version_id, parent, bytes, source_ref, ts FROM versions"
                 " WHERE doc=? AND version_id=?", (doc, version_id)
             ).fetchone()
+            pinned = False
+            broken = False
         else:
-            r2 = _latest_row(c, doc)
+            r2, broken = _latest_row(c, doc)
             row = r2[1:] if r2 else None
+            pinned = bool(r2 and not broken) and _pin_vid(c, doc) == r2[1]
+        if broken:
+            # round 11：断链不静默——记账+回显，但不自愈（读路径不写库）。pin 指向的
+            # 版本若因同内容重新 put 而复活（内容寻址），断链自愈；显式 unpin 是唯一清除路径。
+            _ledger({"event": "threesome.archive.pin_broken", "doc": doc,
+                     "pinned_version": _pin_vid(c, doc),
+                     "fell_back_to": row[0] if row else None})
         if not row:
             return json.dumps({"ok": False,
                                "error": f"version not found: {doc}@{version_id or 'latest'}"})
@@ -227,6 +254,8 @@ def archive_get(doc: str, version_id: str = "", reason: str = "") -> str:
     _ledger({"event": "threesome.archive.get", "doc": doc, "version_id": vid,
              "bytes": b, "reason": reason or None})
     head = f"(archive {doc} @ {vid} · {b}B · parent {parent or '—'} · {ts}"
+    if pinned:
+        head += " · 📌 pinned"
     if source_ref:
         head += f" · source_ref {source_ref}"
     return head + ")\n\n" + content
@@ -246,6 +275,7 @@ def archive_list(doc: str = "") -> str:
             ).fetchall()
             if not rows:
                 return "(archive empty)"
+            pins_all = {d: v for d, v in c.execute("SELECT doc, version_id FROM pins").fetchall()}
             latest: dict = {}
             count: dict = {}
             for d, vid, b, ts in rows:
@@ -253,6 +283,19 @@ def archive_list(doc: str = "") -> str:
                 count[d] = count.get(d, 0) + 1
             out = [f"(archive: {len(count)} docs)"]
             for d in sorted(count):
+                pv = pins_all.get(d)
+                if pv:
+                    # round 11：概览认 pin——latest 跟 get 同语义（get 不带 version_id 解析到哪，
+                    # 概览就显示哪）。断链回显 ⚠️，同单链模式。
+                    prow = c.execute(
+                        "SELECT version_id, ts FROM versions WHERE doc=? AND version_id=?",
+                        (d, pv),
+                    ).fetchone()
+                    if prow:
+                        out.append(f"  {d} — {count[d]} versions · latest {prow[0]} · {prow[1]} 📌")
+                        continue
+                    out.append(f"  {d} — {count[d]} versions · latest {latest[d]} · ⚠️ pin broken ({pv})")
+                    continue
                 out.append(f"  {d} — {count[d]} versions · latest {latest[d]}")
             return "\n".join(out)
         if not _valid_name(doc):
@@ -266,6 +309,10 @@ def archive_list(doc: str = "") -> str:
         pin = c.execute("SELECT version_id FROM pins WHERE doc=?", (doc,)).fetchone()
         pinned_vid = pin[0] if pin else None
         out = [f"(doc {doc}: {len(rows)} versions, newest first)"]
+        if pinned_vid and not any(vid == pinned_vid for vid, *_ in rows):
+            # round 11：断链回显不记账——list 是地址导航（契约：结构不记、内容记），
+            # 记账归 get 碰到断链时的 pin_broken 事件。
+            out.append(f"  ⚠️ pin broken: 指向 {pinned_vid} 不在版本链上，latest 已现算回落")
         for vid, parent, b, source_ref, ts in rows:
             mark = "📌 " if vid == pinned_vid else ""
             line = f"  {mark}{vid} · {b}B · {ts} · parent {parent or '—'}"
@@ -376,7 +423,7 @@ def archive_pin(doc: str, version_id: str, reason: str = "") -> str:
         ).fetchone():
             return json.dumps({"ok": False,
                                "error": f"version not found: {doc}@{version_id}"})
-        prev = _latest_row(c, doc)
+        prev, _broken = _latest_row(c, doc)
         previous = prev[1] if prev else None
         c.execute(
             "INSERT INTO pins(doc, version_id, reason, ts) VALUES(?,?,?,?)"
@@ -411,7 +458,7 @@ def archive_unpin(doc: str, reason: str = "") -> str:
         if had_pin:
             c.execute("DELETE FROM pins WHERE doc=?", (doc,))
             c.commit()
-        prev = _latest_row(c, doc)
+        prev, _broken = _latest_row(c, doc)
         current = prev[1] if prev else None
         _ledger({"event": "threesome.archive.unpin", "doc": doc,
                  "unpinned": had_pin[0] if had_pin else None,

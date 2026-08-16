@@ -484,6 +484,68 @@ async def archive_suite():
                   and led_v04[1].get("event") == "threesome.archive.unpin",
                   str(led_v04))
 
+            # ---- round 11（Zcode review）：断链不静默 + pinned 对 get 透明 ----
+            # 重建 pin 现场用于 r11 场景
+            pin2 = json.loads(await call(s, "archive_pin", doc="hongxinshe", version_id=v2,
+                                         reason="r11前置：重新钉回v2"))
+            check("[arch][r11] 前置 pin v2 ok", pin2.get("ok") is True, pin2)
+            # 修2：get head 带 pinned 标记
+            g_pin = await call(s, "archive_get", doc="hongxinshe")
+            check("[arch][r11] get latest=pinned v2 时 head 带 📌 pinned",
+                  g_pin.startswith(f"(archive hongxinshe @ {v2}")
+                  and "📌 pinned" in g_pin.splitlines()[0], g_pin[:120])
+            # 显式取 v3（非 pin 版本）不带 pinned 标记——标记只在指针解析路径上出现
+            g_v3 = await call(s, "archive_get", doc="hongxinshe", version_id=v3)
+            check("[arch][r11] 显式 version_id 取非pin版本无 pinned 标记",
+                  "📌 pinned" not in g_v3.splitlines()[0], g_v3[:120])
+            # 修1：手工把 pin 的版本行删掉制造断链 → get 回落现算 + 记 pin_broken
+            cu = sqlite3.connect(Path(ROOT, "archive", "index.db"))
+            cu.execute("DELETE FROM versions WHERE doc='hongxinshe' AND version_id=?", (v2,))
+            cu.commit(); cu.close()
+            g_broken = await call(s, "archive_get", doc="hongxinshe")
+            check("[arch][r11] 断链后 get 回落现算（最后插入行=v3）",
+                  g_broken.startswith(f"(archive hongxinshe @ {v3}"), g_broken[:120])
+            led_r11 = []
+            for l in Path(ROOT, "ledger.jsonl").read_text(encoding="utf-8").strip().splitlines():
+                try:
+                    e = json.loads(l)
+                except json.JSONDecodeError:
+                    continue
+                if e.get("event") == "threesome.archive.pin_broken":
+                    led_r11.append(e)
+            check("[arch][r11] 断链被 get 碰到时记 pin_broken 账本事件（不静默）",
+                  len(led_r11) == 1
+                  and led_r11[0].get("pinned_version") == v2
+                  and led_r11[0].get("fell_back_to") == v3,
+                  str(led_r11))
+            # list 单链模式断链回显 ⚠️
+            l_broken = await call(s, "archive_list", doc="hongxinshe")
+            check("[arch][r11] list 单链断链回显 ⚠️ pin broken",
+                  "⚠️ pin broken" in l_broken, l_broken[:200])
+            # 全库概览认 pin：另建 doc pin 住，概览 latest 显示 pinned 版本
+            p4 = json.loads(await call(s, "archive_put", doc="r11doc",
+                                       content="# r11 概览认pin\n\nv1\n"))
+            v4 = p4["version_id"]
+            p5 = json.loads(await call(s, "archive_put", doc="r11doc",
+                                       content="# r11 概览认pin\n\nv2\n",
+                                       parent_version=v4))
+            v5 = p5["version_id"]
+            pin3 = json.loads(await call(s, "archive_pin", doc="r11doc", version_id=v4,
+                                         reason="r11：概览latest认pin"))
+            check("[arch][r11] 前置 r11doc pin v4 ok", pin3.get("ok") is True, pin3)
+            l_all = await call(s, "archive_list")
+            r11_line = next((ln for ln in l_all.splitlines() if ln.strip().startswith("r11doc")), "")
+            check("[arch][r11] 全库概览 latest 认 pin（显示 v4 + 📌）",
+                  v4 in r11_line and "📌" in r11_line and v5 not in r11_line, r11_line)
+            # 全库概览断链回显 ⚠️
+            cu = sqlite3.connect(Path(ROOT, "archive", "index.db"))
+            cu.execute("DELETE FROM versions WHERE doc='r11doc' AND version_id=?", (v4,))
+            cu.commit(); cu.close()
+            l_all2 = await call(s, "archive_list")
+            r11_line2 = next((ln for ln in l_all2.splitlines() if ln.strip().startswith("r11doc")), "")
+            check("[arch][r11] 全库概览断链回显 ⚠️ pin broken",
+                  "⚠️ pin broken" in r11_line2 and v5 in r11_line2, r11_line2)
+
 async def windows_sim_suite():
     """Windows模拟（照照round-4方法）：sys.modules['fcntl']=None 拦截fcntl，
     两个server必须仍能启动握手——v0.3顶层 import fcntl 在Windows上import即死。"""

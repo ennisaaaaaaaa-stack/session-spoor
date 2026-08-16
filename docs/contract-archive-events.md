@@ -4,6 +4,7 @@
 > v0.1 (79eff9b)：初稿。v0.2：照照 round 7 六裁决落地（四认一改一升格）+ source_ref 真空区补链。
 > **round 10 终验（照照，2026-08-16）：零新发现，四条修法逐条坐实（TOCTOU 延时注入重放 rows=1 / source_ref_dropped 实测带回 / 迁移自动清重 / link 歧义回显），95/95 第二机器绿。draft 转正。**
 > v0.4 实现追加 pin/unpin 事件（a91fd99，104/104）——转正时并入本表。
+> round 11 追加 pin_broken 事件（Zcode review 中等1 落地，113/113）。
 > 依据：DESIGN.md 档案房蓝图（照照定稿）的工具面：put / get / list / link / query（+ v0.4: pin / unpin）
 > 前置：threesome.journal.* / threesome.workbench.* 契约 v0.2 正式版（round 6 终验）
 
@@ -23,6 +24,7 @@
 | threesome.archive.query | query, hits | 内容 | FTS 检索，同 journal.search：记条数不记内容 |
 | threesome.archive.pin | doc, version_id, previous, reason? | 结构 | **指针变更**（v0.4，a91fd99）。latest 显式钉到指定版本——回退场景：v3 实测不如 v2，pin 回 v2，reason 进账本=回退的历史证据。previous 记变更前 latest。被拒的 pin 不留痕（同 put/link 拒绝纪律） |
 | threesome.archive.unpin | doc, unpinned?, current_latest, reason? | 结构 | 撤销 pin，latest 回落现算（最后插入行）。幂等：没钉过也能调，unpinned=null。成功才记账 |
+| threesome.archive.pin_broken | doc, pinned_version, fell_back_to | 结构 | **断链审计**（round 11，Zcode review 中等1）。pin 指向的版本行不存在（外部损坏/手工清库）时 latest 现算回落——回落照旧（指针坏了不能让 latest 无解），但不再静默：get 碰到断链即记此事件，pinned_version 留档断链前的指针，fell_back_to 留档实际回落行。同 round 6 source_ref 静默丢弃的药方：断链审计先回显后回落。读路径不写库不自愈——pin 指向版本若因同内容重新 put 复活（内容寻址），断链自愈；显式 unpin 是唯一清除路径 |
 
 不记账的：archive_list（地址导航，原则2——总则不变量）；put 的入库前父版本读取（父版本读取如果显式调 get 才记）；被拒的 pin/unpin（指针变更未发生，账本不记未发生的事）。
 
