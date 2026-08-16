@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS versions(
 CREATE TABLE IF NOT EXISTS links(
     from_version TEXT, to_uri TEXT, relation TEXT, ts TEXT
 );
+CREATE TABLE IF NOT EXISTS pins(
+    doc TEXT PRIMARY KEY, version_id TEXT, reason TEXT, ts TEXT
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
     body, doc UNINDEXED, version_id UNINDEXED, tokenize='trigram'
 );
@@ -117,7 +120,16 @@ def _vid(content: str) -> str:
 
 
 def _latest_row(c: sqlite3.Connection, doc: str):
-    """latest 是指针不是版本：现算（最后插入的一行），不落盘。"""
+    """latest 是指针不是版本：显式 pin 优先；无 pin 现算（最后插入的一行）。不落盘指的是
+    不为现算结果单写一行——pin 是用户显式声明的指针，落 pins 表。"""
+    pin = c.execute("SELECT version_id FROM pins WHERE doc=?", (doc,)).fetchone()
+    if pin:
+        row = c.execute(
+            "SELECT doc, version_id, parent, bytes, source_ref, ts FROM versions"
+            " WHERE doc=? AND version_id=?", (doc, pin[0])
+        ).fetchone()
+        if row:
+            return row
     return c.execute(
         "SELECT doc, version_id, parent, bytes, source_ref, ts FROM versions"
         " WHERE doc=? ORDER BY rowid DESC LIMIT 1", (doc,)
@@ -251,9 +263,12 @@ def archive_list(doc: str = "") -> str:
         ).fetchall()
         if not rows:
             return f"(no versions: {doc})"
+        pin = c.execute("SELECT version_id FROM pins WHERE doc=?", (doc,)).fetchone()
+        pinned_vid = pin[0] if pin else None
         out = [f"(doc {doc}: {len(rows)} versions, newest first)"]
         for vid, parent, b, source_ref, ts in rows:
-            line = f"  {vid} · {b}B · {ts} · parent {parent or '—'}"
+            mark = "📌 " if vid == pinned_vid else ""
+            line = f"  {mark}{vid} · {b}B · {ts} · parent {parent or '—'}"
             if source_ref:
                 line += f" · src {source_ref}"
             out.append(line)
@@ -337,6 +352,76 @@ def _json_safe(fn):
         except Exception as e:
             return json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"})
     return wrapper
+
+@mcp.tool()
+def archive_pin(doc: str, version_id: str, reason: str = "") -> str:
+    """回退/锚定：把 doc 的 latest 指针显式钉到指定版本。
+
+    场景：v3 实测不如 v2 → pin 回 v2。之后 get(不带 version_id) 解析到 v2，
+    list 链上该版本带 📌。put 不受影响（仍可继续长新枝，但不动 pin——
+    想让新版本成为 latest 就 unpin 或 pin 到新版本）。
+    unpin = 撤销 pin，latest 回落现算（最后插入行）。
+
+    Args:
+        doc: 文档名
+        version_id: 要钉住的版本号（必须已存在于该 doc 下）
+        reason: 为什么钉（如"回退：v3系实测不稳"）——进账本，回退的历史证据
+    """
+    if not _valid_name(doc):
+        return json.dumps({"ok": False, "error": f"invalid doc name: {doc!r}"})
+    c = _conn()
+    try:
+        if not c.execute(
+            "SELECT 1 FROM versions WHERE doc=? AND version_id=?", (doc, version_id)
+        ).fetchone():
+            return json.dumps({"ok": False,
+                               "error": f"version not found: {doc}@{version_id}"})
+        prev = _latest_row(c, doc)
+        previous = prev[1] if prev else None
+        c.execute(
+            "INSERT INTO pins(doc, version_id, reason, ts) VALUES(?,?,?,?)"
+            " ON CONFLICT(doc) DO UPDATE SET version_id=excluded.version_id,"
+            " reason=excluded.reason, ts=excluded.ts",
+            (doc, version_id, reason or "", _now()),
+        )
+        c.commit()
+        _ledger({"event": "threesome.archive.pin", "doc": doc, "version_id": version_id,
+                 "previous": previous, "reason": reason or None})
+        return json.dumps({"ok": True, "doc": doc, "version_id": version_id,
+                           "previous": previous, "reason": reason or None})
+    finally:
+        c.close()
+
+
+@mcp.tool()
+def archive_unpin(doc: str, reason: str = "") -> str:
+    """撤销 pin：latest 回落现算（最后插入行）。没钉过也能调——幂等，返回当前现算值。
+
+    Args:
+        doc: 文档名
+        reason: 为什么撤销（进账本）
+    """
+    if not _valid_name(doc):
+        return json.dumps({"ok": False, "error": f"invalid doc name: {doc!r}"})
+    c = _conn()
+    try:
+        if not c.execute("SELECT 1 FROM versions WHERE doc=?", (doc,)).fetchone():
+            return json.dumps({"ok": False, "error": f"no versions: {doc}"})
+        had_pin = c.execute("SELECT version_id FROM pins WHERE doc=?", (doc,)).fetchone()
+        if had_pin:
+            c.execute("DELETE FROM pins WHERE doc=?", (doc,))
+            c.commit()
+        prev = _latest_row(c, doc)
+        current = prev[1] if prev else None
+        _ledger({"event": "threesome.archive.unpin", "doc": doc,
+                 "unpinned": had_pin[0] if had_pin else None,
+                 "current_latest": current, "reason": reason or None})
+        return json.dumps({"ok": True, "doc": doc,
+                           "unpinned": had_pin[0] if had_pin else None,
+                           "current_latest": current})
+    finally:
+        c.close()
+
 
 for _t in getattr(getattr(mcp, "_tool_manager", None), "_tools", {}).values():
     _t.fn = _json_safe(_t.fn)

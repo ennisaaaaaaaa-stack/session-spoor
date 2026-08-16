@@ -289,7 +289,7 @@ async def archive_suite():
         async with ClientSession(r, w) as s:
             await s.initialize()
             lt = await s.list_tools()
-            check("archive tools listed", len(lt.tools) == 5,
+            check("archive tools listed", len(lt.tools) == 7,
                   str([t.name for t in lt.tools]))
 
             # ---- put：内容寻址 + DAG + source_ref ----
@@ -428,6 +428,61 @@ async def archive_suite():
             check("[arch][r9] 同内容双 doc，link 歧义回显 docs",
                   lk_amb2.get("ok") is True and lk_amb2.get("docs") == ["alpha", "beta"], lk_amb2)
             check("[arch][r9] link 带 doc 精确锚定通过", lk_ok2.get("ok") is True and "docs" not in lk_ok2, lk_ok2)
+
+            # ---- pin/unpin：latest 指针显式管理（回退场景 v0.4）----
+            # 场景：真回退——先长出 v3（latest=v3），实测 v3 不如 v2 → pin 回 v2
+            p3 = json.loads(await call(s, "archive_put", doc="hongxinshe",
+                                       content="# 世界观 v3\n\n丝织业主线推翻重写。\n", parent_version=v2))
+            check("[arch][v0.4] 前置 v3 ok", p3.get("ok") is True, p3)
+            v3 = p3["version_id"]
+            pin1 = json.loads(await call(s, "archive_pin", doc="hongxinshe", version_id=v2,
+                                         reason="回退：v3系实测不稳"))
+            check("[arch][v0.4] pin v2 ok 且 previous=v3", pin1.get("ok") is True
+                  and pin1.get("previous") == v3, pin1)
+            g_after = await call(s, "archive_get", doc="hongxinshe")  # 不带 version_id = latest
+            check("[arch][v0.4] get latest 解析回 pinned v2",
+                  g_after.startswith(f"(archive hongxinshe @ {v2}"), g_after[:120])
+            # 版本链导航能看到 pin 状态（按行首匹配——parent 字段里也有 vid，防止抓错行）
+            def _line_of(vid):
+                return next((ln for ln in l_pin.splitlines()
+                             if ln.strip().lstrip("📌 ").startswith(vid)), "")
+            l_pin = await call(s, "archive_list", doc="hongxinshe")
+            v2_line = _line_of(v2)
+            v3_line = _line_of(v3)
+            check("[arch][v0.4] list 链上 v2 行带 📌，v3 行不带",
+                  "📌" in v2_line and "📌" not in v3_line, l_pin[:200])
+            # pin 不存在版本 → 拒
+            pin_bad = json.loads(await call(s, "archive_pin", doc="hongxinshe",
+                                            version_id="deadbeef0000", reason="x"))
+            check("[arch][v0.4] pin 不存在版本被拒", pin_bad.get("ok") is False, pin_bad)
+            # pin 不存在 doc → 拒
+            pin_bad2 = json.loads(await call(s, "archive_pin", doc="no-such-doc",
+                                             version_id=v1, reason="x"))
+            check("[arch][v0.4] pin 不存在 doc 被拒", pin_bad2.get("ok") is False, pin_bad2)
+            # unpin → 回落现算（最后插入行 = v3）
+            un1 = json.loads(await call(s, "archive_unpin", doc="hongxinshe"))
+            check("[arch][v0.4] unpin ok 回落现算", un1.get("ok") is True, un1)
+            g_fallback = await call(s, "archive_get", doc="hongxinshe")
+            check("[arch][v0.4] unpin 后 latest 现算回 v3（最后插入行）",
+                  g_fallback.startswith(f"(archive hongxinshe @ {v3}"), g_fallback[:120])
+            # 账本纪律：成功的 pin/unpin 各记一笔（带 reason），被拒的不留痕
+            led_v04 = []
+            for l in Path(ROOT, "ledger.jsonl").read_text(encoding="utf-8").strip().splitlines():
+                try:
+                    e = json.loads(l)
+                except json.JSONDecodeError:
+                    continue
+                ev = str(e.get("event", ""))
+                if ev in ("threesome.archive.pin", "threesome.archive.unpin"):
+                    led_v04.append(e)
+            check("[arch][v0.4] pin/unpin 各一笔带 reason，被拒零痕迹",
+                  len(led_v04) == 2
+                  and led_v04[0].get("event") == "threesome.archive.pin"
+                  and led_v04[0].get("version_id") == v2
+                  and led_v04[0].get("previous") == v3
+                  and led_v04[0].get("reason") == "回退：v3系实测不稳"
+                  and led_v04[1].get("event") == "threesome.archive.unpin",
+                  str(led_v04))
 
 async def windows_sim_suite():
     """Windows模拟（照照round-4方法）：sys.modules['fcntl']=None 拦截fcntl，
