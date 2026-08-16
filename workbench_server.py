@@ -111,7 +111,7 @@ def workbench_new(project: str, description: str = "") -> str:
     (p / "description.md").write_text(description + "\n", encoding="utf-8")
     (p / "STATUS.md").write_text("# STATUS\n\n刚创建，还没开工。\n", encoding="utf-8")
     _index_write()
-    _ledger({"event": "wb_new", "project": project, "desc": description})
+    _ledger({"event": "threesome.workbench.new", "project": project, "desc": description})
     return json.dumps({"ok": True, "project": project, "dir": str(p)})
 
 @mcp.tool()
@@ -142,12 +142,20 @@ def workbench_journal(project: str, entry: str, mark: str = "判断") -> str:
     line = f"- **[{mark}]** {spoor_common.stamped(_now())} {entry}"
     spoor_common.append_journal(jf, line)
     _index_write()
+    # 契约 v0.2: entry_head 前80字符（含mark前缀）。journal会被消化cron清理，
+    # 清理后账本是这条内容唯一的持久痕迹——够识别、不够泄漏。
+    _ledger({"event": "threesome.journal.write", "project": project, "file": jf.name,
+             "mark": mark, "bytes": len(entry.encode("utf-8")), "entry_head": line[:80]})
     return json.dumps({"ok": True, "journal": str(jf.name), "mark": mark, "agent": spoor_common.agent_name() or None})
 
 @mcp.tool()
-def workbench_read_journal(project: str, mark: str = "", limit: int = 30) -> str:
+def workbench_read_journal(project: str, mark: str = "", limit: int = 30, reason: str = "") -> str:
     """读记录条。可按mark过滤。
-    开工仪式：新session接手项目先读 mark=坑 的。"""
+    开工仪式：新session接手项目先读 mark=坑 的。
+
+    Args:
+        reason: 触发来源（如 "开工仪式"/"醒来"），进账本——审计要看是谁在什么场合读的。可空。
+    """
     p = _proj(project)
     entries = []
     # 按文件名（日期）升序遍历，entries 全局按时间排——[-limit:] 取最新
@@ -164,6 +172,8 @@ def workbench_read_journal(project: str, mark: str = "", limit: int = 30) -> str
         prefix = f"- **[{mark}]**"
         entries = [(d, ln) for d, ln in entries if ln.startswith(prefix)]
     entries = entries[-limit:]
+    _ledger({"event": "threesome.journal.read", "project": project, "mark": mark or None,
+             "limit": limit, "reason": reason or None, "entries": len(entries)})
     return "\n".join(f"{d} | {ln}" for d, ln in entries) if entries else "(empty)"
 
 @mcp.tool()
@@ -175,10 +185,15 @@ def workbench_snippet(project: str, name: str, content: str = "") -> str:
     if content:
         sp.parent.mkdir(parents=True, exist_ok=True)
         sp.write_text(content, encoding="utf-8")
+        # 存入不记账：写不是"模型可见内容"事件（契约 v0.2 裁决5）
         return json.dumps({"ok": True, "saved": name, "bytes": len(content.encode())})
     if not sp.exists():
         return json.dumps({"ok": False, "error": f"snippet not found: {name}"})
-    return sp.read_text(encoding="utf-8")
+    got = sp.read_text(encoding="utf-8")
+    # 直取记账：实打实进过模型上下文的内容（契约 v0.2 裁决5）
+    _ledger({"event": "threesome.workbench.snippet_get", "project": project,
+             "name": name, "bytes": len(got.encode("utf-8"))})
+    return got
 
 @mcp.tool()
 def workbench_list() -> str:
@@ -193,7 +208,7 @@ def workbench_complete(project: str, note: str = "") -> str:
     p = _proj(project)
     (p / "DONE").write_text(f"completed {_now()} {note}".strip() + "\n", encoding="utf-8")
     _index_write()
-    _ledger({"event": "wb_complete", "project": project, "note": note})
+    _ledger({"event": "threesome.workbench.complete", "project": project, "note": note})
     return json.dumps({"ok": True, "project": project, "note": "done — awaiting digestion cron"})
 
 
@@ -215,6 +230,9 @@ def workbench_search(query: str, type: str = "", project: str = "", agent: str =
         if isinstance(e, sqlite3.OperationalError):
             return json.dumps({"ok": False, "error": f"bad query syntax: {e}", "hint": 'phrase → "文件锁"  OR → 词1 OR 词2'})
         raise
+    # 契约 v0.2: hits 记条数不记内容——内容在文件里，账本只记"发生过检索"
+    _ledger({"event": "threesome.journal.search", "query": query, "type": type or None,
+             "project": project or None, "agent": agent or None, "hits": len(rows)})
     if not rows:
         return "(no hits)"
     def _rel(p: str) -> str:
