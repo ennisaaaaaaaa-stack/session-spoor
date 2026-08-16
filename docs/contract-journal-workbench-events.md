@@ -50,6 +50,11 @@ wb_new / wb_complete 两个旧裸事件名随本契约落地迁移为 threesome.
 1. journal.search 的 hit_ids：预留格式 = (project, file, 行号) 复合键。journal 行没有天然 ID，复合键是唯一能回答"模型这次检索到底看见了什么行"的诚实选择。现在不加，等 window 消化真的需要回溯时再加——但格式以此为准，不另发明 ID 体系。（裁决1）
 2. window.start / window.end 事件：等做完一轮真实 window 消化再提。（裁决3认可）
 3. workbench_status 的"醒来先读"：将来并进 journal.read 语义（reason="醒来"），不单独立事件。（裁决5）
+4. ledger 读取事件的记账：**不记**（已裁决为设计而非遗漏——见"账本读取通道"节）。审计层的读取不污染审计层：access log 不记录"有人看了 access log"，否则每读一次多一行、自我放大。ledger_query 本身零写入。
+
+## 账本读取通道（ledger_query，8/16 增补）
+
+账本不在 FTS 索引里——它是审计层（access log）不是阅读层，出事时它是唯一说实话的。工作台新增 `ledger_query` 工具作为其唯一读取通道：倒序扫描 + kind 前缀 / agent / date / contains 子串过滤 + skip_recent 翻页，纯顺序扫描零依赖（万行毫秒级）。读取本身不记账（见上）。验证"蒸发的不值得全文留"这个设计假设：账本里每条 cleanup 事件带 mode（export_marked/ledger/evaporate），毕业率/蒸发率随时可算；"想找回但找不回"的真实案例出现时，entry_head 80 字符是唯一考古线索——读取工具就是验证仪器。
 
 ## 实现状态
 

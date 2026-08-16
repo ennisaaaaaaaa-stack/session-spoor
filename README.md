@@ -74,7 +74,7 @@ journal是读-改-写，ledger是追加——多进程同时写会交错。`spoo
 
 ## 全文检索（v0.3新增）
 
-`workbench_search` + `workbench_reindex`，SQLite FTS5。
+`workbench_search` + `workbench_reindex` + `ledger_query`，SQLite FTS5。
 
 ```
 workbench_search(query="文件锁")                     # 全文搜

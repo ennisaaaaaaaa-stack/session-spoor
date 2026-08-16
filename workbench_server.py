@@ -248,6 +248,67 @@ def workbench_search(query: str, type: str = "", project: str = "", agent: str =
 
 
 @mcp.tool()
+def ledger_query(kind: str = "", contains: str = "", agent: str = "", date: str = "", limit: int = 20, skip_recent: int = 0) -> str:
+    """读账本（审计层）。倒序+过滤，纯顺序扫描，零依赖。
+
+    账本不在 FTS 索引里（它是 access log 不是阅读层），这个工具是它唯一的读取通道。
+    读取本身不记账——审计层的读取不污染审计层，access log 不记录"有人看了 access log"，
+    否则每读一次多一行、自我放大。此决策入契约待审（照照 round 7）。
+
+    Args:
+        kind: 事件过滤。前缀匹配（"cleanup" 匹配所有 cleanup；"threesome." 匹配全契约域；空=不过滤）
+        contains: 任意文本子串，对整条 JSON 行匹配（如 "export_marked"、"桡骨"）
+        agent: 只看某住户的事件
+        date: "2026-08-16" 当天 / "2026-08" 当月
+        limit: 最多返回几条（从最新往回数）
+        skip_recent: 跳过最新 N 条——翻页用
+    """
+    lines = []
+    ledger_path = ROOT / "ledger.jsonl"
+    if ledger_path.exists():
+        with open(ledger_path, encoding="utf-8") as f:
+            lines = [l for l in f if l.strip()]
+    total = len(lines)
+
+    def _match(obj: dict, raw: str) -> bool:
+        if kind and not str(obj.get("event", obj.get("kind", ""))).startswith(kind):
+            return False
+        if agent and obj.get("agent") != agent:
+            return False
+        if date:
+            ts = str(obj.get("ts", ""))
+            if not ts.startswith(date):
+                return False
+        if contains and contains not in raw:
+            return False
+        return True
+
+    hits = []
+    skipped = 0
+    for raw in reversed(lines):          # 倒序：最近的永远最常被查
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue                      # 脏行不炸，跳过并计数
+        if not _match(obj, raw):
+            continue
+        if skip_recent and skipped < skip_recent:
+            skipped += 1
+            continue
+        hits.append(raw.rstrip("\n"))
+        if len(hits) >= limit:
+            break
+
+    head = f"(ledger {total} lines, {len(hits)} hits"
+    if skip_recent:
+        head += f", skipped {skip_recent}"
+    head += ")"
+    if not hits:
+        return head + " — no match"
+    return head + "\n" + "\n".join(hits)
+
+
+@mcp.tool()
 def workbench_reindex() -> str:
     """全量重建检索索引。schema 变更或怀疑索引脏时用。日常搜索自动增量，无需手动调。"""
     r = spoor_search.update_index(force=True)
