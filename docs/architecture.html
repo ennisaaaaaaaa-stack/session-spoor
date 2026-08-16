@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>session-spoor · 猎迹 Architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', 'Noto Sans SC', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+    .container { max-width: 1240px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+    svg { width: 100%; min-width: 1000px; display: block; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    .card { background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem; border: 1px solid #1e293b; padding: 1.25rem; }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; }
+    .card li { margin-bottom: 0.375rem; line-height: 1.5; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>session-spoor · 猎迹 — Architecture</h1>
+      </div>
+      <p class="subtitle">Agent 干活的痕迹管理系统 · MCP 双 server · 三层存储 · 一本账本 —— 插件可拔，账本不可少</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1100 880">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrowamber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" />
+          </marker>
+          <marker id="arrowrose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185" />
+          </marker>
+          <marker id="arrowcyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" />
+          </marker>
+          <marker id="arrowemerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#34d399" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- ============ ARROWS (behind boxes) ============ -->
+        <!-- agents -> servers : stdio -->
+        <line x1="240" y1="124" x2="240" y2="186" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowcyan)"/>
+        <text x="252" y="160" fill="#94a3b8" font-size="9">stdio MCP</text>
+        <line x1="560" y1="124" x2="560" y2="186" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowcyan)"/>
+        <text x="572" y="160" fill="#94a3b8" font-size="9">stdio MCP</text>
+
+        <!-- servers -> shared libs -->
+        <line x1="240" y1="286" x2="240" y2="346" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="545" y1="286" x2="500" y2="346" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- scratchpad server -> scratch/ (curved lane right of mark chip) -->
+        <path d="M 575 286 C 625 330, 625 440, 555 478 L 507 507" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="632" y="468" fill="#94a3b8" font-size="8">space 读写</text>
+
+        <!-- spoor_common -> workbench/ and ledger -->
+        <line x1="240" y1="434" x2="240" y2="506" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="250" y="472" fill="#94a3b8" font-size="8">journal · snippet</text>
+        <path d="M 195 434 C 112 470, 100 580, 185 675" fill="none" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowamber)"/>
+        <text x="80" y="553" fill="#fbbf24" font-size="8">append</text>
+        <text x="80" y="566" fill="#fbbf24" font-size="8">带锁</text>
+
+        <!-- spoor_search -> .search (lane right of region content) -->
+        <path d="M 600 434 L 600 450 Q 600 460 610 460 L 920 460 Q 930 460 930 470 L 930 697 Q 930 707 920 707 L 686 707" fill="none" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrowhead)"/>
+        <text x="940" y="580" fill="#94a3b8" font-size="8" transform="rotate(90 940 580)">索引读写</text>
+
+        <!-- export graduation: scratch -> workbench -->
+        <line x1="388" y1="560" x2="354" y2="560" stroke="#34d399" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowemerald)"/>
+        <text x="371" y="549" fill="#34d399" font-size="8" text-anchor="middle">export</text>
+        <text x="371" y="576" fill="#94a3b8" font-size="7" text-anchor="middle">毕业路径</text>
+
+        <!-- DONE -> digest cron -->
+        <path d="M 235 654 C 235 790, 480 815, 778 682" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6,4" marker-end="url(#arrowamber)"/>
+        <text x="430" y="790" fill="#fbbf24" font-size="8">✅ DONE 触发</text>
+
+        <!-- cron -> skills -->
+        <line x1="912" y1="707" x2="961" y2="707" stroke="#64748b" stroke-width="1.2" stroke-dasharray="4,4" marker-end="url(#arrowhead)"/>
+
+        <!-- archive -> Tideline pointer -->
+        <line x1="842" y1="540" x2="956" y2="528" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrowrose)"/>
+        <text x="895" y="513" fill="#fb7185" font-size="8" text-anchor="middle">指针 · 不合并</text>
+
+        <!-- ============ AGENTS ============ -->
+        <rect x="150" y="60" width="180" height="64" rx="6" fill="#0f172a"/>
+        <rect x="150" y="60" width="180" height="64" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="240" y="82" fill="white" font-size="12" font-weight="600" text-anchor="middle">主 Agent</text>
+        <text x="240" y="98" fill="#94a3b8" font-size="9" text-anchor="middle">Hermes / 任何 MCP client</text>
+        <text x="240" y="113" fill="#22d3ee" font-size="8" text-anchor="middle">常驻 · 绑工作台</text>
+
+        <rect x="470" y="60" width="180" height="64" rx="6" fill="#0f172a"/>
+        <rect x="470" y="60" width="180" height="64" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="560" y="82" fill="white" font-size="12" font-weight="600" text-anchor="middle">分身 Agent</text>
+        <text x="560" y="98" fill="#94a3b8" font-size="9" text-anchor="middle">sub-agent · 临时工</text>
+        <text x="560" y="113" fill="#22d3ee" font-size="8" text-anchor="middle">SPOOR_AGENT=名字 · 多住户</text>
+
+        <!-- ============ MCP SERVERS ============ -->
+        <rect x="130" y="190" width="220" height="96" rx="6" fill="#0f172a"/>
+        <rect x="130" y="190" width="220" height="96" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="240" y="212" fill="white" font-size="12" font-weight="600" text-anchor="middle">workbench_server.py</text>
+        <text x="240" y="228" fill="#94a3b8" font-size="9" text-anchor="middle">工作台 · 9 tools</text>
+        <text x="240" y="246" fill="#94a3b8" font-size="8" text-anchor="middle">journal · read_journal · snippet</text>
+        <text x="240" y="260" fill="#94a3b8" font-size="8" text-anchor="middle">search(FTS5) · reindex · list</text>
+        <text x="240" y="274" fill="#94a3b8" font-size="8" text-anchor="middle">status · new / complete</text>
+
+        <rect x="450" y="190" width="220" height="96" rx="6" fill="#0f172a"/>
+        <rect x="450" y="190" width="220" height="96" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="560" y="212" fill="white" font-size="12" font-weight="600" text-anchor="middle">scratchpad_server.py</text>
+        <text x="560" y="228" fill="#94a3b8" font-size="9" text-anchor="middle">涂鸦房 · 8 tools</text>
+        <text x="560" y="246" fill="#94a3b8" font-size="8" text-anchor="middle">create · write · read · list</text>
+        <text x="560" y="260" fill="#94a3b8" font-size="8" text-anchor="middle">mark · status</text>
+        <text x="560" y="274" fill="#94a3b8" font-size="8" text-anchor="middle">export · cleanup（三去向）</text>
+
+        <!-- ============ SHARED LIBS ============ -->
+        <rect x="130" y="350" width="220" height="84" rx="6" fill="#0f172a"/>
+        <rect x="130" y="350" width="220" height="84" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="240" y="372" fill="white" font-size="12" font-weight="600" text-anchor="middle">spoor_common.py</text>
+        <text x="240" y="388" fill="#94a3b8" font-size="8" text-anchor="middle">flock 文件锁 · SPOOR_AGENT 盖戳</text>
+        <text x="240" y="402" fill="#94a3b8" font-size="8" text-anchor="middle">append_ledger / append_journal</text>
+        <text x="240" y="419" fill="#34d399" font-size="7" text-anchor="middle">两 server 共用 · 写入唯一通道</text>
+
+        <rect x="380" y="350" width="220" height="84" rx="6" fill="#0f172a"/>
+        <rect x="380" y="350" width="220" height="84" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="490" y="372" fill="white" font-size="12" font-weight="600" text-anchor="middle">spoor_search.py</text>
+        <text x="490" y="388" fill="#94a3b8" font-size="8" text-anchor="middle">SQLite FTS5 · trigram（CJK 3字滑窗）</text>
+        <text x="490" y="402" fill="#94a3b8" font-size="8" text-anchor="middle">增量索引：按 (path, mtime)</text>
+        <text x="490" y="419" fill="#34d399" font-size="7" text-anchor="middle">索引源：journal·snippet·design·STATUS·scratch</text>
+
+        <rect x="640" y="350" width="200" height="84" rx="6" fill="#0f172a"/>
+        <rect x="640" y="350" width="200" height="84" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="740" y="372" fill="white" font-size="12" font-weight="600" text-anchor="middle">mark 词汇表 · 五值</text>
+        <text x="740" y="388" fill="#94a3b8" font-size="8" text-anchor="middle">判断 / 数据 / 坑</text>
+        <text x="740" y="402" fill="#94a3b8" font-size="8" text-anchor="middle">待审·自 / 待审·人</text>
+        <text x="740" y="419" fill="#a78bfa" font-size="7" text-anchor="middle">两档法官：自=主agent · 人=人类拍板</text>
+
+        <!-- ============ STIGMERGY_ROOT REGION ============ -->
+        <rect x="40" y="470" width="920" height="330" rx="12" fill="rgba(251, 191, 36, 0.05)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="56" y="490" fill="#fbbf24" font-size="10" font-weight="600">STIGMERGY_ROOT —— 一台机器一份 · 多 agent 共享</text>
+        <text x="900" y="490" fill="#94a3b8" font-size="8" text-anchor="end">过程共享 · 运行时不共享</text>
+
+        <!-- workbench/ -->
+        <rect x="120" y="510" width="230" height="144" rx="6" fill="#0f172a"/>
+        <rect x="120" y="510" width="230" height="144" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="212" y="532" fill="white" font-size="12" font-weight="600" text-anchor="middle">workbench/ · L1.5 工作台</text>
+        <rect x="282" y="516" width="56" height="14" rx="3" fill="rgba(6, 78, 59, 0.8)"/>
+        <text x="310" y="526" fill="#34d399" font-size="7" text-anchor="middle">进 git ✓</text>
+        <text x="212" y="552" fill="#94a3b8" font-size="8" text-anchor="middle">journal/（按天 · mark 五值）</text>
+        <text x="212" y="568" fill="#94a3b8" font-size="8" text-anchor="middle">snippets/ 复用件架</text>
+        <text x="212" y="584" fill="#94a3b8" font-size="8" text-anchor="middle">design/ · STATUS.md</text>
+        <text x="212" y="600" fill="#94a3b8" font-size="8" text-anchor="middle">INDEX.md · DONE✅</text>
+        <text x="212" y="622" fill="#a78bfa" font-size="7" text-anchor="middle">绑 agent · 逐项目目录</text>
+
+        <!-- scratch/ -->
+        <rect x="390" y="510" width="190" height="144" rx="6" fill="#0f172a"/>
+        <rect x="390" y="510" width="190" height="144" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="485" y="532" fill="white" font-size="12" font-weight="600" text-anchor="middle">scratch/ · L1 涂鸦房</text>
+        <rect x="490" y="516" width="56" height="14" rx="3" fill="rgba(30, 41, 59, 0.9)"/>
+        <text x="518" y="526" fill="#94a3b8" font-size="7" text-anchor="middle">运行时</text>
+        <text x="485" y="552" fill="#94a3b8" font-size="8" text-anchor="middle">按 space_id 隔离</text>
+        <text x="485" y="570" fill="#94a3b8" font-size="8" text-anchor="middle">结束三去向：</text>
+        <text x="485" y="586" fill="#94a3b8" font-size="8" text-anchor="middle">导出 → 工作台/档案</text>
+        <text x="485" y="602" fill="#94a3b8" font-size="8" text-anchor="middle">账本 · 蒸发</text>
+        <text x="485" y="624" fill="#a78bfa" font-size="7" text-anchor="middle">绑任务 · 64MB 上限</text>
+
+        <!-- archive/ planned -->
+        <rect x="620" y="510" width="220" height="144" rx="6" fill="#0f172a"/>
+        <rect x="620" y="510" width="220" height="144" rx="6" fill="rgba(76, 29, 149, 0.15)" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="6,4"/>
+        <text x="730" y="532" fill="white" font-size="12" font-weight="600" text-anchor="middle">archive/ · L2 档案房</text>
+        <rect x="700" y="516" width="76" height="14" rx="3" fill="rgba(120, 53, 15, 0.7)"/>
+        <text x="738" y="526" fill="#fbbf24" font-size="7" text-anchor="middle">契约 v0.1 起草中</text>
+        <text x="730" y="552" fill="#94a3b8" font-size="8" text-anchor="middle">版本化 sha256 内容寻址</text>
+        <text x="730" y="568" fill="#94a3b8" font-size="8" text-anchor="middle">parent DAG · append-only</text>
+        <text x="730" y="584" fill="#94a3b8" font-size="8" text-anchor="middle">消化门槛 processed_by</text>
+        <text x="730" y="600" fill="#94a3b8" font-size="8" text-anchor="middle">put / get / list / link / query</text>
+        <text x="730" y="622" fill="#a78bfa" font-size="7" text-anchor="middle">永久 · 不改不删，修复也是新版本</text>
+
+        <!-- ledger.jsonl -->
+        <rect x="120" y="680" width="300" height="64" rx="6" fill="#0f172a"/>
+        <rect x="120" y="680" width="300" height="64" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="270" y="700" fill="white" font-size="11" font-weight="600" text-anchor="middle">ledger.jsonl —— 账本 · append-only</text>
+        <text x="270" y="716" fill="#94a3b8" font-size="8" text-anchor="middle">不进 git · 全体共享 · 唯一持久痕迹</text>
+        <text x="270" y="732" fill="#fbbf24" font-size="7" text-anchor="middle">threesome.workbench.* / threesome.journal.*（六类 · v0.2）</text>
+
+        <!-- .locks / .search -->
+        <rect x="450" y="680" width="100" height="50" rx="6" fill="#0f172a"/>
+        <rect x="450" y="680" width="100" height="50" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="500" y="700" fill="white" font-size="10" font-weight="600" text-anchor="middle">.locks/</text>
+        <text x="500" y="714" fill="#94a3b8" font-size="8" text-anchor="middle">flock 锁文件</text>
+
+        <rect x="580" y="680" width="100" height="50" rx="6" fill="#0f172a"/>
+        <rect x="580" y="680" width="100" height="50" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="630" y="700" fill="white" font-size="10" font-weight="600" text-anchor="middle">.search/</text>
+        <text x="630" y="714" fill="#94a3b8" font-size="8" text-anchor="middle">FTS5 索引</text>
+
+        <!-- digest cron planned -->
+        <rect x="710" y="678" width="200" height="64" rx="6" fill="#0f172a"/>
+        <rect x="710" y="678" width="200" height="64" rx="6" fill="rgba(120, 53, 15, 0.2)" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6,4"/>
+        <text x="810" y="698" fill="white" font-size="11" font-weight="600" text-anchor="middle">消化 cron</text>
+        <text x="810" y="714" fill="#94a3b8" font-size="8" text-anchor="middle">第三期 · 规划</text>
+        <text x="810" y="730" fill="#94a3b8" font-size="7" text-anchor="middle">✅→整理进 skill · 清理工作台 · 入账</text>
+
+        <!-- skills (outside root) -->
+        <rect x="966" y="682" width="90" height="50" rx="6" fill="#0f172a"/>
+        <rect x="966" y="682" width="90" height="50" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="1011" y="702" fill="white" font-size="10" font-weight="600" text-anchor="middle">skills</text>
+        <text x="1011" y="716" fill="#94a3b8" font-size="7" text-anchor="middle">毕业终点</text>
+
+        <!-- Tideline (outside root) -->
+        <rect x="960" y="505" width="110" height="52" rx="6" fill="#0f172a"/>
+        <rect x="960" y="505" width="110" height="52" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="1015" y="525" fill="white" font-size="10" font-weight="600" text-anchor="middle">Tideline 记忆</text>
+        <text x="1015" y="540" fill="#94a3b8" font-size="7" text-anchor="middle">想起什么 ≠ 做过什么</text>
+
+        <!-- ============ LEGEND ============ -->
+        <text x="720" y="70" fill="white" font-size="10" font-weight="600">Legend</text>
+        <rect x="720" y="82" width="16" height="10" rx="2" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="742" y="90" fill="#94a3b8" font-size="8">Agent / MCP 客户端</text>
+        <rect x="720" y="98" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="742" y="106" fill="#94a3b8" font-size="8">MCP server / 共享层</text>
+        <rect x="720" y="114" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="742" y="122" fill="#94a3b8" font-size="8">存储层</text>
+        <rect x="720" y="130" width="16" height="10" rx="2" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="742" y="138" fill="#94a3b8" font-size="8">账本 / ROOT 边界</text>
+        <rect x="720" y="146" width="16" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="742" y="154" fill="#94a3b8" font-size="8">运行时（不进 git）</text>
+        <rect x="720" y="162" width="16" height="10" rx="2" fill="transparent" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="742" y="170" fill="#94a3b8" font-size="8">规划中（虚线）</text>
+        <line x1="720" y1="184" x2="736" y2="184" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="742" y="187" fill="#94a3b8" font-size="8">指针 / 边界（不合并）</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot rose"></div>
+          <h3>三层结构 · 生命周期递进</h3>
+        </div>
+        <ul>
+          <li>• L1 涂鸦房 scratch/ —— 绑任务，结束三去向：导出 / 账本 / 蒸发</li>
+          <li>• L1.5 工作台 workbench/ —— 绑 agent，journal + snippet + 全文检索</li>
+          <li>• L2 档案房 archive/ —— 永久，版本化 sha256 寻址（契约 v0.1 起草中）</li>
+          <li>• 毕业路径：草稿 → 复用件 → skill，三级越来越永久</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>共享契约 · 多 agent 工棚</h3>
+        </div>
+        <ul>
+          <li>• mark 五值词汇表：判断 / 数据 / 坑 / 待审·自 / 待审·人</li>
+          <li>• SPOOR_AGENT 环境变量署名，UTF-8 任意名，不设=匿名</li>
+          <li>• flock 并发安全：8 进程 × 20 轮压测零丢失（Windows 退化裸写）</li>
+          <li>• 运行时不进 git：进 git 的只有 journal · snippet · design · STATUS</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot amber"></div>
+          <h3>账本事件契约 v0.2 · 正式版</h3>
+        </div>
+        <ul>
+          <li>• 六类事件全前缀：workbench.new / .complete / .snippet_get · journal.write / .read / .search</li>
+          <li>• entry_head 前 80 字符——存在性论证 + 自毁条款（字段跟着理由走）</li>
+          <li>• reason 必须有真实数据来源（工具参数直通账本）</li>
+          <li>• hits 记条数不记内容——账本只记"发生过"，不复制正文</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer">
+      session-spoor · 猎迹 v0.3.1 · 回归 58/58 · 契约 v0.2 正式版 · 档案房 v0.1 起草中 — 2026-08-16
+    </p>
+  </div>
+</body>
+</html>
