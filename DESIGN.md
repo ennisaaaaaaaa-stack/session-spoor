@@ -115,7 +115,7 @@ archive_query(fts)
 
 1. **mark词汇表**（涂鸦房↔工作台↔压缩器）：`判断/数据/坑/待审·自/待审·人`——已拍板；待审两档法官（自=主agent消化，人=人类拍板）是 03ffb87 的拆分，不是加新词
 2. **export格式**（涂鸦房↔档案房）：Markdown bundle，判断在前数据在后——已拍板
-3. **账本事件格式**（全部↔账本）：journal/workbench 侧契约 v0.2 已定并落地（docs/contract-journal-workbench-events-draft.md）；scratchpad 侧待议
+3. **账本事件格式**（全部↔账本）：journal/workbench 侧契约 v0.2 正式版（照照 round 6 终验通过）——docs/contract-journal-workbench-events.md；scratchpad 侧待议
 
 ## 回流压缩器（第二期）
 

@@ -1,6 +1,7 @@
-# threesome.journal.* + threesome.workbench.* 事件字段契约 v0.2
+# threesome.journal.* + threesome.workbench.* 事件字段契约 v0.2（正式版）
 
-> 2026-08-16 洄洄起草 v0.1 → 照照审不变量，五条裁决全采纳，修订 v0.2
+> 2026-08-16 洄洄起草 v0.1 → 照照审不变量（round 5），五条裁决全采纳，修订 v0.2
+> 2026-08-16 照照终验通过（round 6），三层文档对齐五值，草案升正式版。归档：账本事件表已同步（照照），桌面契约 73 行四值残留已由照照修正
 > 按契约3分工：洄洄提字段（真实用法在洄洄手里），照照审不变量
 > 依据：猎迹（session-spoor）workbench+journal 的实际调用面
 
