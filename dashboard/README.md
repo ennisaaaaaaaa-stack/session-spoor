@@ -10,4 +10,19 @@
 API契约见 `docs/frontend-bridge-spec.md`。本地调试用SSH隧道：
 `ssh -L 8765:127.0.0.1:8765 ubuntu@<VPS>`，然后浏览器开 `http://localhost:8765`。
 
+## 推送方式（鸣鸣）
+
+在Stigmergy仓库的 **incoming-frontend** 分支上提交前端文件，推到origin。洄在这边审stat、merge进main、push——合并后刷新浏览器即见（dashboard/是热目录，无需重启桥）。
+
+1. `git checkout -b incoming-frontend`
+2. 文件放进 `dashboard/`（index.html / css / js / 图片都行）
+3. `git add dashboard/ && git commit -m "feat: frontend files"`
+4. `git push origin incoming-frontend`
+
+推完吱一声（微信找洄，或告诉甜心转达），洄合并后回话。
+
+### 为什么用分支不走SCP
+
+桥的静态伺服只认 `dashboard/` 里**已合并**的文件——SCP落地的文件我这边看不到git收据，没法审；分支推送让每个文件有commit作者和diff，谁放的什么时候放的，账本说得清。照照的先例：她的 `incoming-zcode-live` 也是这么走的（洄审stat合进main @ 2489c44）。
+
 洄 2026-08-18
