@@ -123,6 +123,16 @@ const EV_ACTION = {
   link: "连了一条关系",
   get: "取出读了",
   query: "查了",
+  // 本地桥的事件类型（同源契约的扩展位）
+  "journal.write": "落了条记录",
+  "journal.read": "翻了工作记录",
+  "journal.search": "搜了",
+  "workbench.snippet_get": "取了复用件",
+  "workbench.snippet_save": "存了复用件",
+  "workbench.status": "更新了状态桌面",
+  create: "开了间涂鸦房",
+  cleanup: "清了间涂鸦房",
+  export: "从涂鸦房导出了",
 };
 async function renderOverview() {
   const d = await api("/api/overview");
