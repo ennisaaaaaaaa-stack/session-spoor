@@ -6,3 +6,5 @@ ledger.jsonl
 .locks/
 scratch/
 exports/
+archive/
+
