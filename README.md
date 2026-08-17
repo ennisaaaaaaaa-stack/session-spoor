@@ -151,6 +151,10 @@ STIGMERGY_ROOT=~/spoor python scratchpad_server.py
 
 任何MCP client直接挂载（Hermes/Claude/其他），不绑任何runtime。每个server自带依赖，只要`mcp`一个包。
 
+进阶文档：
+- [QUICKSTART.zh.md](docs/QUICKSTART.zh.md)——本地 stdio 三分钟接入
+- [multi-runtime.zh.md](docs/multi-runtime.zh.md)——网络形态：中心实例 + 异构客户端远程连（跨OS/跨机器，2026-08 三住户实测）
+
 ### 回归测试
 
 ```bash
