@@ -14,6 +14,7 @@ spoor-view 桥 — 档案房只读 HTTP 窗口（给鸣鸣的前端 fetch 用）
 """
 
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -21,7 +22,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ROOT = Path("/home/ubuntu/Stigmergy")
+# 环境变量化（照照 8/18 的结构性观察）：桥不该绑死在"VPS 部署脚本"身份上。
+# 第二台机器（WSL/本地 clone）可指向自己的档案根复现/自测；默认值不变。
+ROOT = Path(os.environ.get("SPOOR_VIEW_ROOT", "/home/ubuntu/Stigmergy"))
 DB = ROOT / "archive" / "index.db"
 WB = ROOT / "workbench"
 LEDGER = ROOT / "ledger.jsonl"
@@ -68,13 +71,25 @@ def _db():
     return sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
 
 
+def _pin_vid(c, doc):
+    """pin 查询，schema 漂移防御：旧库（档案房升级前）没有 pins 表，
+    sqlite3.OperationalError 时降级为'当作无 pin'而不是 500。
+    照照 8/18 在 WSL 旧 schema 库上抓到的真 bug——桥跑的机器不一定
+    是建表那台机器，多住户共享的是文件根不是 schema 版本。"""
+    try:
+        row = c.execute("SELECT version_id FROM pins WHERE doc=?", (doc,)).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    return row[0] if row else None
+
+
 def _latest(c, doc):
     """与 archive_server._latest_row 同算法：pin 优先，无 pin 取最后插入行。"""
-    pin = c.execute("SELECT version_id FROM pins WHERE doc=?", (doc,)).fetchone()
-    if pin:
+    pin_vid = _pin_vid(c, doc)
+    if pin_vid:
         row = c.execute(
             "SELECT doc, version_id, parent, bytes, source_ref, ts FROM versions"
-            " WHERE doc=? AND version_id=?", (doc, pin[0])
+            " WHERE doc=? AND version_id=?", (doc, pin_vid)
         ).fetchone()
         if row:
             return row
@@ -89,9 +104,7 @@ def _doc_meta(c, row):
     version_count = c.execute(
         "SELECT count(*) FROM versions WHERE doc=?", (doc,)
     ).fetchone()[0]
-    pinned = c.execute(
-        "SELECT 1 FROM pins WHERE doc=?", (doc,)
-    ).fetchone()
+    pinned = _pin_vid(c, doc) is not None
     return {
         "doc": doc,
         "version_id": vid,
