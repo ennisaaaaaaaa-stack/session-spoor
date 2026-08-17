@@ -80,9 +80,10 @@ Windows 侧自启脚本。
 注意时序：会话开着时改 mcp.json **不会热加载**，新 server 只对新会话生效
 （或 `/reload` 后）。
 
-### Claude Code
+### Claude Code（已实测）
 
-`.mcp.json`（项目级或用户级），`url` 字段同构：
+Windows 宿主连 WSL 中心实例，`http://localhost:<port>/mcp` 一次连通
+（含 WSL2 NAT 模式 localhost 转发验证）。`.mcp.json`（项目级或用户级）：
 
 ```json
 {
@@ -175,5 +176,5 @@ ZCode(Claude Code)  ──HTTP:8792──┘   ├─ workbench/（三项目，�
 
 ---
 
-*本文档的所有配置和并发数据来自真实部署实测（2026-08，mcp 1.29.0）。
-Claude Code 侧配置为同构推断，以官方文档为准。*
+*本文档的所有配置和并发数据来自真实部署实测（2026-08，mcp 1.29.0；
+Claude Code 侧 2026-08-18 实测连通，含 WSL localhost 转发验证）。*
