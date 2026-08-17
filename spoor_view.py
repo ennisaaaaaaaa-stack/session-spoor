@@ -26,6 +26,41 @@ DB = ROOT / "archive" / "index.db"
 WB = ROOT / "workbench"
 LEDGER = ROOT / "ledger.jsonl"
 REPOS_FILE = ROOT / "workbench" / "repos.json"
+DASH = ROOT / "dashboard"
+
+MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+    ".md": "text/markdown; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+}
+
+PLACEHOLDER_HTML = """<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>Stigmergy 桥</title>
+<style>
+body{background:#0a0a0f;color:#d8d4e8;font:16px/1.7 monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+div{text-align:left;max-width:560px;padding:2em;border:1px solid #2a2a3a;border-radius:8px;background:#111118}
+h1{font-size:1.1em;margin:0 0 .8em;color:#a78bfa}
+p{margin:.4em 0}
+code{color:#7dd3fc}
+</style></head><body><div>
+<h1>spoor-view 桥活着 ✓</h1>
+<p>这是 dashboard/index.html 的位置。前端文件放进 dashboard/ 目录即可生效（刷新浏览器，无需重启桥）。</p>
+<p>API：<code>/api/overview</code> <code>/api/projects</code> <code>/api/graph</code> <code>/api/archive</code></p>
+<p>契约文档：<code>docs/frontend-bridge-spec.md</code>（仓库里有）</p>
+</div></body></html>"""
 
 
 def _db():
@@ -372,11 +407,52 @@ class Handler(BaseHTTPRequestHandler):
                         self._json(404, {"error": f"project not found"})
                         return
                 else:
-                    self._json(404, {"error": "unknown route"})
+                    self._serve_static(path)
                     return
             self._json(200, data)
         except Exception as e:
             self._json(500, {"error": repr(e)})
+
+    def _serve_static(self, path):
+        """dashboard/ 静态伺服 — 前端文件落地即生效，桥无需重启。
+
+        - `/` → dashboard/index.html（没有则占位页）
+        - 其余路径 → dashboard/ 下对应文件，realpath 防目录逃逸
+        - `/api/*` 已在 do_GET 路由里先处理，静态伺服永远盖不住 API
+        """
+        rel = path.lstrip("/")
+        if not rel:
+            candidate = DASH / "index.html"
+        else:
+            candidate = (DASH / rel).resolve()
+            # 防目录逃逸：解析后必须仍在 dashboard/ 内
+            if not str(candidate).startswith(str(DASH.resolve())):
+                self._json(404, {"error": "forbidden"})
+                return
+        if candidate.is_file():
+            body = candidate.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", MIME.get(candidate.suffix.lower(), "application/octet-stream"))
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        elif not rel:
+            # 占位页：前端还没来，告诉访客桥活着
+            self._html(200, PLACEHOLDER_HTML)
+        else:
+            self._json(404, {"error": f"not found: /{rel}"})
+
+    def _html(self, code, body_text):
+        body = body_text.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _json(self, code, obj):
         body = json.dumps(obj, ensure_ascii=False, default=str).encode()
