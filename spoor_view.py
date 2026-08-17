@@ -16,6 +16,7 @@ spoor-view 桥 — 档案房只读 HTTP 窗口（给鸣鸣的前端 fetch 用）
 import json
 import re
 import sqlite3
+import subprocess
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,6 +25,7 @@ ROOT = Path("/home/ubuntu/Stigmergy")
 DB = ROOT / "archive" / "index.db"
 WB = ROOT / "workbench"
 LEDGER = ROOT / "ledger.jsonl"
+REPOS_FILE = ROOT / "workbench" / "repos.json"
 
 
 def _db():
@@ -182,13 +184,54 @@ def _parse_status(path):
     text = path.read_text(encoding="utf-8", errors="replace")
     h = re.search(r"更新于\s*([0-9-]+ [0-9:]+)", text)
     updated = h.group(1) if h else ""
+    pri = re.search(r"^优先级\s*[:：]\s*(.+)$", text, re.M)
+    priority = pri.group(1).strip() if pri else ""
     sections = {}
     for key in ("做到哪", "下一步", "卡在哪"):
         m = re.search(
             rf"{key}[:：]?(.*?)(?=\n(?:下一步|卡在哪)[:：]?|\Z)", text, re.S)
         if m:
             sections[key] = m.group(1).strip()
-    return {"updated": updated, "sections": sections}
+    return {"updated": updated, "priority": priority, "sections": sections}
+
+
+def _load_repos():
+    # 桌名 → 仓库路径映射（声明式配置，每请求重读，改完不用重启）
+    try:
+        return json.loads(REPOS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _git(repo, *args):
+    try:
+        r = subprocess.run(
+            ["git", "-c", f"safe.directory={repo}", "-C", str(repo), *args],
+            capture_output=True, text=True, timeout=5)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except Exception as e:
+        return -1, "", repr(e)
+
+
+def git_state(repo):
+    # 收据轴：本地 git 状态。只读，不 fetch——ahead 相对本地 remote-tracking。
+    st = {"repo": str(repo), "branch": "", "dirty": 0, "ahead": None, "last_commit": ""}
+    rc, out, _ = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    if rc == 0:
+        st["branch"] = out
+    rc, out, _ = _git(repo, "status", "--porcelain")
+    if rc == 0:
+        st["dirty"] = len([l for l in out.splitlines() if l.strip()])
+    rc, out, _ = _git(repo, "rev-list", "--count", "@{u}..HEAD")
+    if rc == 0:
+        try:
+            st["ahead"] = int(out)
+        except ValueError:
+            pass
+    rc, out, _ = _git(repo, "log", "-1", "--format=%ad %h %s", "--date=short")
+    if rc == 0:
+        st["last_commit"] = out
+    return st
 
 
 def _project(dirpath):
@@ -199,10 +242,14 @@ def _project(dirpath):
     journal.sort(key=lambda e: e["ts"], reverse=True)
     dp = dirpath / "description.md"
     desc = dp.read_text(encoding="utf-8", errors="replace").strip() if dp.exists() else ""
+    repo = _load_repos().get(dirpath.name)
+    git = git_state(repo) if repo and Path(repo).is_dir() else None
     return {
         "project": dirpath.name,
         "description": desc,
         "status": status,
+        "priority": (status["priority"] if status else ""),
+        "git": git,
         "todo": (status["sections"].get("下一步", "") if status else ""),
         "blocked": (status["sections"].get("卡在哪", "") if status else ""),
         "pending_review": [e for e in journal if "待审" in e["mark"]],
@@ -249,6 +296,21 @@ def ledger_tail(n=50):
 
 # ---------- overview 聚合 ----------
 
+def _needs_push(g):
+    return bool(g) and (g["dirty"] > 0 or (g["ahead"] or 0) > 0 or g["ahead"] is None)
+
+
+def _push_detail(g):
+    bits = []
+    if g["dirty"]:
+        bits.append(f"{g['dirty']} 个未提交文件")
+    if g["ahead"] is None:
+        bits.append("无上游（从未推送或未设 upstream）")
+    elif g["ahead"] > 0:
+        bits.append(f"{g['ahead']} 个 commit 未推送")
+    return "；".join(bits)
+
+
 def overview():
     projects = workbench_projects()
     return {
@@ -265,6 +327,17 @@ def overview():
             for p in projects for e in p["pending_review"]
         ],
         "recent_events": ledger_tail(50),
+        "push_queue": [
+            {"project": p["project"], "git": p["git"]}
+            for p in projects if _needs_push(p.get("git"))
+        ],
+        "needs_attention": [
+            {"type": "review", "project": p["project"], "detail": e["entry"], "ts": e["ts"]}
+            for p in projects for e in p["pending_review"]
+        ] + [
+            {"type": "push", "project": p["project"], "detail": _push_detail(p["git"]), "ts": ""}
+            for p in projects if _needs_push(p.get("git"))
+        ],
         "archive_docs": archive_docs(),
     }
 
