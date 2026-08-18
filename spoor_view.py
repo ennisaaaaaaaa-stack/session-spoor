@@ -276,7 +276,7 @@ def _parse_frontmatter(text):
       - project: tideline
         relation: 记忆层底座
     缺失/畸形 → 全部默认值，桥不因 frontmatter 问题 500。"""
-    fm = {"lifecycle": "生长", "ecosystem": "", "relates_to": []}
+    fm = {"lifecycle": "生长", "ecosystem": "", "relates_to": [], "milestones": []}
     m = FRONTMATTER_RE.match(text)
     if not m:
         return fm
@@ -296,6 +296,17 @@ def _parse_frontmatter(text):
                 fm["relates_to"] = []
             cur = "list"
             continue
+        mm = re.match(r"^milestones\s*:\s*(.*)$", line.strip())
+        if mm:
+            if mm.group(1).strip() == "[]":
+                fm["milestones"] = []
+            cur = "milestones"
+            continue
+        if cur == "milestones":
+            mi = re.match(r"^-\s*(.+)$", line.strip())
+            if mi:
+                fm["milestones"].append(mi.group(1).strip())
+                continue
         if cur == "list":
             m4 = re.match(r"^-\s*project\s*:\s*(.+)$", line.strip())
             if m4:
@@ -330,7 +341,7 @@ def _parse_status(path):
             sections[key] = m.group(1).strip()
     return {"updated": updated, "priority": priority, "sections": sections,
             "lifecycle": fm["lifecycle"], "ecosystem": fm["ecosystem"],
-            "relates_to": fm["relates_to"]}
+            "relates_to": fm["relates_to"], "milestones": fm["milestones"]}
 
 
 def _load_repos():
@@ -386,6 +397,7 @@ def _project(dirpath):
         "lifecycle": (status["lifecycle"] if status else "生长"),
         "ecosystem": (status["ecosystem"] if status else ""),
         "relates_to": (status["relates_to"] if status else []),
+        "milestones": (status["milestones"] if status else []),
     }
     return {
         "project": dirpath.name,
@@ -395,6 +407,7 @@ def _project(dirpath):
         "lifecycle": meta["lifecycle"],
         "ecosystem": meta["ecosystem"],
         "relates_to": meta["relates_to"],
+        "milestones": meta["milestones"],
         "git": git,
         "todo": (status["sections"].get("下一步", "") if status else ""),
         "blocked": (status["sections"].get("卡在哪", "") if status else ""),

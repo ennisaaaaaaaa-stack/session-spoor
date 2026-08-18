@@ -34,19 +34,19 @@ frontmatter 缺失或字段缺失 → 默认 `lifecycle: 生长`、`ecosystem: "
 
 **语义（甜心 2026-08-18 定）**：毕业=已归档；胚胎=未完成；生长=进行中；里程碑=已完成的部分。生态归属：Portalk生态={portalk, tideline, session spoor}；声海={ocean-listen, music box}。
 
-**开放问题（待甜心裁决）**：进行中的项目有了已完成部分，摆哪格？例：Portalk 主线在跑（生长）但 v0.x 已交付（里程碑成果）。当前初稿沿用鸣鸣 lifecycle.json 现值（portalk=里程碑），上面这个张力标在这，改值不改文档结构。
+**已裁决（甜心 2026-08-18）——主状态模型**：lifecycle 是项目的**主状态**（在跑=生长，收档=毕业），已完成的部分不抢格子，以 `milestones` 成就列表挂在项目页。例：Portalk 主线在跑 → lifecycle=生长；v0.x 交付、前端上线 → milestones 列表。里程碑是项目的成就，不是项目的状态。
 
 **初稿值**（= 鸣鸣 lifecycle.json 现值 + 两个新增，均可改）：
 
-| project | lifecycle | ecosystem |
-|---|---|---|
-| portalk | 里程碑 | portalk |
-| session-spoor-review | 里程碑 | portalk |
-| ocean-listen | 生长 | 声海 |
-| spoor-dashboard | 生长 | 猎迹 |
-| memory-wash | 生长 | 猎迹 |
-| tideline | 里程碑 | portalk |
-| music-box | 待定 | 声海 |
+| project | lifecycle | ecosystem | milestones |
+|---|---|---|---|
+| portalk | 生长 | portalk | v0.x 交付；档案房前端上线（2026-08-18） |
+| session-spoor-review | 里程碑 | portalk | — |
+| ocean-listen | 生长 | 声海 | — |
+| spoor-dashboard | 生长 | 猎迹 | — |
+| memory-wash | 生长 | 猎迹 | 档案房 9 doc 收官（2026-08-18） |
+| tideline | 生长 | portalk | v2.4 闭环（2026-08-09）；Kimi3 入驻成为底座（2026-08-12） |
+| music-box | 生长 | 声海 | — |
 
 注：dashboard/lifecycle.json 退役——数据进 frontmatter 后前端不再单独 fetch 它（过渡期桥继续 serve，前端切换完成后删）。
 
