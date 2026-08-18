@@ -261,21 +261,76 @@ def _parse_journal(path):
     return entries
 
 
+FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.S)
+
+# 契约 v0.1：lifecycle/ecosystem/relates_to 的合法值（软校验，未知值原样透传）
+LIFECYCLE_VALUES = {"毕业", "里程碑", "生长", "胚胎"}
+
+
+def _parse_frontmatter(text):
+    """STATUS.md 头部的 YAML frontmatter（契约 v0.1）。
+    不引入 yaml 依赖：只认三个键，用行级解析。
+    lifecycle: 生长
+    ecosystem: portalk
+    relates_to:
+      - project: tideline
+        relation: 记忆层底座
+    缺失/畸形 → 全部默认值，桥不因 frontmatter 问题 500。"""
+    fm = {"lifecycle": "生长", "ecosystem": "", "relates_to": []}
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        return fm
+    block = m.group(1)
+    cur = None  # relates_to 当前条目
+    for line in block.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m2 = re.match(r"^(lifecycle|ecosystem)\s*:\s*(.+)$", line.strip())
+        if m2:
+            fm[m2.group(1)] = m2.group(2).strip()
+            cur = None
+            continue
+        m3 = re.match(r"^relates_to\s*:\s*(.*)$", line.strip())
+        if m3:
+            if m3.group(1).strip() == "[]":
+                fm["relates_to"] = []
+            cur = "list"
+            continue
+        if cur == "list":
+            m4 = re.match(r"^-\s*project\s*:\s*(.+)$", line.strip())
+            if m4:
+                entry = {"project": m4.group(1).strip(), "relation": ""}
+                fm["relates_to"].append(entry)
+                cur = entry
+                continue
+        if isinstance(cur, dict):
+            m5 = re.match(r"^(relation|project)\s*:\s*(.+)$", line.strip())
+            if m5:
+                cur[m5.group(1)] = m5.group(2).strip()
+                continue
+    return fm
+
+
 def _parse_status(path):
     if not path.exists():
         return None
     text = path.read_text(encoding="utf-8", errors="replace")
-    h = re.search(r"更新于\s*([0-9-]+ [0-9:]+)", text)
+    # frontmatter 在前（契约 v0.1），正文里的正则不受影响——先剥离再解析正文
+    fm = _parse_frontmatter(text)
+    body = FRONTMATTER_RE.sub("", text, count=1)
+    h = re.search(r"更新于\s*([0-9-]+ [0-9:]+)", body)
     updated = h.group(1) if h else ""
-    pri = re.search(r"^优先级\s*[:：]\s*(.+)$", text, re.M)
+    pri = re.search(r"^优先级\s*[:：]\s*(.+)$", body, re.M)
     priority = pri.group(1).strip() if pri else ""
     sections = {}
     for key in ("做到哪", "下一步", "卡在哪"):
         m = re.search(
-            rf"{key}[:：]?(.*?)(?=\n(?:下一步|卡在哪)[:：]?|\Z)", text, re.S)
+            rf"{key}[:：]?(.*?)(?=\n(?:下一步|卡在哪)[:：]?|\Z)", body, re.S)
         if m:
             sections[key] = m.group(1).strip()
-    return {"updated": updated, "priority": priority, "sections": sections}
+    return {"updated": updated, "priority": priority, "sections": sections,
+            "lifecycle": fm["lifecycle"], "ecosystem": fm["ecosystem"],
+            "relates_to": fm["relates_to"]}
 
 
 def _load_repos():
@@ -327,11 +382,19 @@ def _project(dirpath):
     desc = dp.read_text(encoding="utf-8", errors="replace").strip() if dp.exists() else ""
     repo = _load_repos().get(dirpath.name)
     git = git_state(repo) if repo and Path(repo).is_dir() else None
+    meta = {
+        "lifecycle": (status["lifecycle"] if status else "生长"),
+        "ecosystem": (status["ecosystem"] if status else ""),
+        "relates_to": (status["relates_to"] if status else []),
+    }
     return {
         "project": dirpath.name,
         "description": desc,
         "status": status,
         "priority": (status["priority"] if status else ""),
+        "lifecycle": meta["lifecycle"],
+        "ecosystem": meta["ecosystem"],
+        "relates_to": meta["relates_to"],
         "git": git,
         "todo": (status["sections"].get("下一步", "") if status else ""),
         "blocked": (status["sections"].get("卡在哪", "") if status else ""),
