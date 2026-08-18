@@ -123,7 +123,9 @@ def workbench_new(project: str, description: str = "") -> str:
 def workbench_status(project: str, text: str = "") -> str:
     """读/写 STATUS.md —— 进行中状态桌面。
     不传text=读当前状态（下次session醒来先读这个）；
-    传text=覆盖写入（保持最新，写"做到哪/下一步/卡在哪"）。"""
+    传text=覆盖写入（保持最新，写"做到哪/下一步/卡在哪"）。
+    待办约定（v0.2）：「下一步」里的条目标注归属（谁的事谁打头，人名或agent名），
+    办完即从「下一步」移除——已办历史由journal条目流承接，STATUS只留还没做的。"""
     p = _proj(project)
     f = p / "STATUS.md"
     if not text:
