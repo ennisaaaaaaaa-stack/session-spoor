@@ -1,5 +1,6 @@
 workbench/
 archive/
+.spoor_view_token
 __pycache__/
 *.pyc
 patches/

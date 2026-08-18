@@ -13,9 +13,11 @@ spoor-view 桥 — 档案房只读 HTTP 窗口（给鸣鸣的前端 fetch 用）
 地址：http://127.0.0.1:8765 （只绑 127.0.0.1）
 """
 
+import hmac
 import json
 import os
 import re
+import secrets
 import sqlite3
 import subprocess
 import time
@@ -30,6 +32,24 @@ WB = ROOT / "workbench"
 LEDGER = ROOT / "ledger.jsonl"
 REPOS_FILE = ROOT / "workbench" / "repos.json"
 DASH = ROOT / "dashboard"
+
+# ---------- access token（hermes-webui 同款思路）----------
+# token 存本地文件（gitignored），不进 repo。SPOOR_VIEW_TOKEN 环境变量可覆盖。
+# 访问方式：URL 带 ?token=xxx（首次会种 cookie，之后裸开即可）或直接 cookie。
+# 比较用 hmac.compare_digest 防时序侧信道。token 文件不存在且未设 env 时——
+# 只监听 127.0.0.1 的旧形态，直接放行（本地调试不受影响）。
+
+TOKEN_FILE = ROOT / ".spoor_view_token"
+
+
+def _load_token():
+    env = os.environ.get("SPOOR_VIEW_TOKEN")
+    if env:
+        return env.strip()
+    try:
+        return TOKEN_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -63,6 +83,21 @@ code{color:#7dd3fc}
 <p>这是 dashboard/index.html 的位置。前端文件放进 dashboard/ 目录即可生效（刷新浏览器，无需重启桥）。</p>
 <p>API：<code>/api/overview</code> <code>/api/projects</code> <code>/api/graph</code> <code>/api/archive</code></p>
 <p>契约文档：<code>docs/frontend-bridge-spec.md</code>（仓库里有）</p>
+</div></body></html>"""
+
+FORBIDDEN_HTML = """<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>403 · Stigmergy</title>
+<style>
+body{background:#0a0a0f;color:#d8d4e8;font:16px/1.7 monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+div{text-align:center;max-width:480px;padding:2em;border:1px solid #3a2a2a;border-radius:8px;background:#181112}
+h1{font-size:1.1em;margin:0 0 .8em;color:#f87171}
+p{margin:.4em 0}
+code{color:#7dd3fc}
+</style></head><body><div>
+<h1>403 — 这里是私人的</h1>
+<p>Sessions die. Trails don't — 但痕迹不随便给人看。</p>
+<p>带上 <code>?token=…</code> 再来。</p>
 </div></body></html>"""
 
 
@@ -397,6 +432,27 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        query = self.path.split("?", 1)[1] if "?" in self.path else ""
+        # ---- token 门 ----
+        required = _load_token()
+        if required:
+            supplied = None
+            m = re.match(r"(?:^|&)token=([^&]*)", query)
+            if m:
+                supplied = urllib_parse_unquote(m.group(1))
+            if not supplied:
+                cookie_hdr = self.headers.get("Cookie", "") or ""
+                m2 = re.search(r"(?:^|;\\s*)spoor_token=([^;]*)", cookie_hdr)
+                if m2:
+                    supplied = m2.group(1)
+            if not supplied or not hmac.compare_digest(
+                supplied.encode(), required.encode()
+            ):
+                self._html(403, FORBIDDEN_HTML)
+                return
+            # token 从 query 来且合法 → 种 cookie，下次裸开即可
+            if m and m.group(1):
+                self._cookie_value = supplied
         try:
             if path == "/api/overview":
                 data = overview()
@@ -444,13 +500,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
         if candidate.is_file():
             body = candidate.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", MIME.get(candidate.suffix.lower(), "application/octet-stream"))
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_common(200, body, MIME.get(candidate.suffix.lower(), "application/octet-stream"))
         elif not rel:
             # 占位页：前端还没来，告诉访客桥活着
             self._html(200, PLACEHOLDER_HTML)
@@ -459,23 +509,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def _html(self, code, body_text):
         body = body_text.encode("utf-8")
+        self._send_common(code, body, "text/html; charset=utf-8")
+
+    def _send_common(self, code, body, ctype):
         self.send_response(code)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
+        if getattr(self, "_cookie_value", None):
+            self.send_header("Set-Cookie", f"spoor_token={self._cookie_value}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax")
         self.end_headers()
         self.wfile.write(body)
 
     def _json(self, code, obj):
         body = json.dumps(obj, ensure_ascii=False, default=str).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_common(code, body, "application/json; charset=utf-8")
 
     def log_message(self, fmt, *args):
         print(f"[spoor-view] {self.address_string()} {fmt % args}", flush=True)
@@ -487,8 +536,14 @@ def urllib_parse_unquote(s):
 
 
 def main():
-    srv = ThreadingHTTPServer(("127.0.0.1", 8765), Handler)
-    print("[spoor-view] listening on http://127.0.0.1:8765", flush=True)
+    host = os.environ.get("SPOOR_VIEW_HOST", "127.0.0.1")
+    port = int(os.environ.get("SPOOR_VIEW_PORT", "8765"))
+    token = _load_token()
+    if host != "127.0.0.1" and not token:
+        # 公开绑定必须有 token——没锁的门不开到街上
+        raise SystemExit("refusing 0.0.0.0 bind without access token (set SPOOR_VIEW_TOKEN or create .spoor_view_token)")
+    srv = ThreadingHTTPServer((host, port), Handler)
+    print(f"[spoor-view] listening on http://{host}:{port} token={'on' if token else 'off'}", flush=True)
     srv.serve_forever()
 
 
