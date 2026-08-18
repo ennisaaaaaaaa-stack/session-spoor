@@ -182,11 +182,20 @@ async function renderGraph() {
     }
     if (b) edges.push({ a, b, w: 1 + (e.relation === "parent" ? 1 : 0) });
   }
-  // relates_to：项目间的横向边
+  // relates_to：项目间的横向边；对方不在本地墙上 → 画成虚影星（关系是真的，
+  // 只是它住别处——比如 tideline 住在 VPS）
   for (const p of projects) {
     for (const r of p.relates_to || []) {
-      if (ids.has(p.project) && ids.has(r.project))
-        edges.push({ a: p.project, b: r.project, w: 2 });
+      if (!ids.has(p.project)) continue;
+      let target = r.project;
+      if (!ids.has(target)) {
+        target = "ghost:" + r.project;
+        if (!ids.has(target)) {
+          nodes.push({ id: target, type: "ghost", w: 1 });
+          ids.add(target);
+        }
+      }
+      edges.push({ a: p.project, b: target, w: 2 });
     }
   }
   // doc↔project：名字前缀相同就连（契约草案 sanctioned 的 join）
@@ -222,7 +231,7 @@ async function renderGraph() {
   };
   placeGroup(nodes.filter((n) => n.type === "project"), -Math.PI / 2);
   placeGroup(nodes.filter((n) => n.type === "doc"), 0.3);
-  placeGroup(nodes.filter((n) => n.type === "ext"), 0.9);
+  placeGroup(nodes.filter((n) => n.type === "ext" || n.type === "ghost"), 0.9);
   const maxW = Math.max(...edges.map((e) => e.w), 1);
 
   let maxRy = 0;
@@ -245,18 +254,22 @@ async function renderGraph() {
   nodes.forEach((n, i) => {
     const p = pos[n.id];
     if (!p) return;
-    const col = n.type === "ext" ? "#6b6774"
+    const isDim = n.type === "ext" || n.type === "ghost";
+    const col = isDim ? "#6b6774"
       : n.type === "project" ? (ECO_COLORS[n.eco] || ECO_COLORS[""])
       : n.pinned ? "#e8c169" : "#dcd2f7";
-    const core = n.type === "ext" ? 2.2 : n.type === "project" ? 4.2 : n.pinned ? 4.2 : 3.4;
-    const label = n.type === "ext" ? n.id.slice(4, 22) : n.id;
+    const core = isDim ? 2.2 : n.type === "project" ? 4.2 : n.pinned ? 4.2 : 3.4;
+    const label = n.type === "ext" ? n.id.slice(4, 22)
+      : n.type === "ghost" ? n.id.slice(6) + " ↗"
+      : n.id;
+    const dash = n.type === "ghost" ? ` stroke="#8b8794" stroke-dasharray="2 3" fill-opacity="0.35"` : "";
     const delay = ((i * 0.7) % 3.5).toFixed(2);
     const dur = (2.8 + (i % 5) * 0.6).toFixed(2);
     html +=
       `<circle class="halo" filter="url(#soft)" style="animation-delay:${delay}s;animation-duration:${dur}s"` +
       ` cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${core * 3.2}" fill="${col}"/>` +
       `<circle class="core" filter="url(#softcore)" style="animation-delay:${delay}s;animation-duration:${dur}s"` +
-      ` cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${core}" fill="${col}">` +
+      ` cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${core}" fill="${col}"${dash}>` +
       `<title>${esc(n.id)} · ${n.w} 痕迹</title></circle>` +
       `<text x="${p.x.toFixed(1)}" y="${(p.y - core - 9).toFixed(1)}" text-anchor="middle" class="glabel">${esc(label)}</text>`;
   });
