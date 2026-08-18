@@ -145,17 +145,28 @@ async function renderOverview() {
   }).join("");
 }
 
-/* ---------- 链接图：星座星图（同心环聚合，防膨胀） ---------- */
+/* ---------- 链接图：星座星图（同心环聚合，防膨胀） ----------
+   契约草案映射：节点 = 档案 doc + 项目（生态=分区色），
+   边 = archive_link + relates_to；doc↔project 按名字前缀相连。 */
+const ECO_COLORS = { portalk: "#b8a9e8", "声海": "#8fd0e8", "猎迹": "#e8c169", varia: "#a8e0b8", "": "#8b8794" };
 async function renderGraph() {
-  let data;
-  try { data = await api("/api/graph"); } catch { return; }
+  let data, projects = [];
+  try {
+    [data, projects] = await Promise.all([
+      api("/api/graph"),
+      api("/api/projects").catch(() => []),
+    ]);
+  } catch { return; }
   const svg = $("#graph");
   const docs = data.nodes || [];
-  if (!docs.length) { svg.innerHTML = ""; return; }
+  if (!docs.length && !projects.length) { svg.innerHTML = ""; return; }
   const W = 880, H = 380, cx = W / 2, cy = H / 2;
 
-  // 节点=档案 doc，边=archive_link；外部 URI 落成暗淡的外围小星
-  const nodes = docs.map((d) => ({ id: d.doc, pinned: d.pinned, w: d.versions || 1 }));
+  const nodes = docs.map((d) => ({ id: d.doc, type: "doc", pinned: d.pinned, w: d.versions || 1 }));
+  for (const p of projects) {
+    nodes.push({ id: p.project, type: "project", eco: p.ecosystem || "",
+                 w: 2 + count(p.pits) + count(p.pending_review) });
+  }
   const ids = new Set(nodes.map((n) => n.id));
   const edges = [];
   for (const e of data.edges || []) {
@@ -164,12 +175,26 @@ async function renderGraph() {
     if (b && !ids.has(b)) {
       if (e.external) {
         const ext = "ext:" + b;
-        if (!ids.has(ext)) { nodes.push({ id: ext, ext: true, w: 1 }); ids.add(ext); }
+        if (!ids.has(ext)) { nodes.push({ id: ext, type: "ext", w: 1 }); ids.add(ext); }
         edges.push({ a, b: ext, w: 1 });
       }
       continue;
     }
     if (b) edges.push({ a, b, w: 1 + (e.relation === "parent" ? 1 : 0) });
+  }
+  // relates_to：项目间的横向边
+  for (const p of projects) {
+    for (const r of p.relates_to || []) {
+      if (ids.has(p.project) && ids.has(r.project))
+        edges.push({ a: p.project, b: r.project, w: 2 });
+    }
+  }
+  // doc↔project：名字前缀相同就连（契约草案 sanctioned 的 join）
+  for (const d of docs) {
+    for (const p of projects) {
+      if (d.doc.startsWith(p.project) || p.project.startsWith(d.doc))
+        edges.push({ a: p.project, b: d.doc, w: 1 });
+    }
   }
   const deg = {};
   edges.forEach((e) => { deg[e.a] = (deg[e.a] || 0) + 1; deg[e.b] = (deg[e.b] || 0) + 1; });
@@ -195,8 +220,9 @@ async function renderGraph() {
     }
     ringBase = Math.max(ringBase, 62) + (ring - 1) * 62 + 64;
   };
-  placeGroup(nodes.filter((n) => !n.ext), -Math.PI / 2);
-  placeGroup(nodes.filter((n) => n.ext), 0.9);
+  placeGroup(nodes.filter((n) => n.type === "project"), -Math.PI / 2);
+  placeGroup(nodes.filter((n) => n.type === "doc"), 0.3);
+  placeGroup(nodes.filter((n) => n.type === "ext"), 0.9);
   const maxW = Math.max(...edges.map((e) => e.w), 1);
 
   let maxRy = 0;
@@ -219,9 +245,11 @@ async function renderGraph() {
   nodes.forEach((n, i) => {
     const p = pos[n.id];
     if (!p) return;
-    const col = n.ext ? "#6b6774" : n.pinned ? "#e8c169" : "#dcd2f7";
-    const core = n.ext ? 2.2 : n.pinned ? 4.2 : 3.4;
-    const label = n.ext ? n.id.slice(4, 22) : n.id;
+    const col = n.type === "ext" ? "#6b6774"
+      : n.type === "project" ? (ECO_COLORS[n.eco] || ECO_COLORS[""])
+      : n.pinned ? "#e8c169" : "#dcd2f7";
+    const core = n.type === "ext" ? 2.2 : n.type === "project" ? 4.2 : n.pinned ? 4.2 : 3.4;
+    const label = n.type === "ext" ? n.id.slice(4, 22) : n.id;
     const delay = ((i * 0.7) % 3.5).toFixed(2);
     const dur = (2.8 + (i % 5) * 0.6).toFixed(2);
     html +=
