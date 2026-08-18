@@ -45,8 +45,28 @@ document.querySelectorAll(".back-btn").forEach((b) =>
 const count = (v) => Array.isArray(v) ? v.length : (v | 0);
 
 /* ---------- 侧栏：生态分组 + lifecycle 徽章 / 档案房平铺 ---------- */
-const ECO_ORDER = ["portalk", "声海", "猎迹", "varia", ""];
-const ECO_NAMES = { portalk: "Portalk生态", "声海": "声海", "猎迹": "猎迹", varia: "varia", "": "未归属" };
+/* 生态零硬编码：分组顺序/名称/颜色全部从 API 数据动态聚合派生。
+   任何部署用自己的 ecosystem 值，侧栏和星图自动长出自己的分组——
+   代码里只有机制，没有我们的名字。 */
+const ecoGroups = (projects) => {
+  const byEco = {};
+  for (const p of projects) {
+    const e = p.ecosystem || "";
+    (byEco[e] = byEco[e] || []).push(p);
+  }
+  // 项目多的生态靠前；「未归属」（空）永远垫底
+  return Object.entries(byEco).sort((a, b) => {
+    if (!a[0]) return 1;
+    if (!b[0]) return -1;
+    return b[1].length - a[1].length;
+  });
+};
+const ecoColor = (eco) => {
+  if (!eco) return "#8b8794"; // 未归属统一灰
+  let h = 0;
+  for (let i = 0; i < eco.length; i++) h = (h * 31 + eco.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360} 55% 70%)`;
+};
 
 async function renderSidebar() {
   // 项目：ecosystem 树形分组（顶层）+ lifecycle 徽章（主状态），全读 API
@@ -54,13 +74,11 @@ async function renderSidebar() {
     const projects = await api("/api/projects");
     const nav = $("#lifecycle-nav");
     nav.innerHTML = "";
-    for (const eco of ECO_ORDER) {
-      const group = projects.filter((p) => (p.ecosystem || "") === eco);
-      if (!group.length) continue;
+    for (const [eco, group] of ecoGroups(projects)) {
       const det = document.createElement("details");
       det.open = true;
       det.innerHTML =
-        `<summary><span class="lc-name">${esc(ECO_NAMES[eco])}</span>` +
+        `<summary><span class="lc-name">${esc(eco || "未归属")}</span>` +
         `<span class="lc-count">${group.length}</span></summary>`;
       const ul = document.createElement("ul");
       for (const p of group) {
@@ -148,7 +166,6 @@ async function renderOverview() {
 /* ---------- 链接图：星座星图（同心环聚合，防膨胀） ----------
    契约草案映射：节点 = 档案 doc + 项目（生态=分区色），
    边 = archive_link + relates_to；doc↔project 按名字前缀相连。 */
-const ECO_COLORS = { portalk: "#b8a9e8", "声海": "#8fd0e8", "猎迹": "#e8c169", varia: "#a8e0b8", "": "#8b8794" };
 async function renderGraph() {
   let data, projects = [];
   try {
@@ -256,7 +273,7 @@ async function renderGraph() {
     if (!p) return;
     const isDim = n.type === "ext" || n.type === "ghost";
     const col = isDim ? "#6b6774"
-      : n.type === "project" ? (ECO_COLORS[n.eco] || ECO_COLORS[""])
+      : n.type === "project" ? ecoColor(n.eco)
       : n.pinned ? "#e8c169" : "#dcd2f7";
     const core = isDim ? 2.2 : n.type === "project" ? 4.2 : n.pinned ? 4.2 : 3.4;
     const label = n.type === "ext" ? n.id.slice(4, 22)
