@@ -23,11 +23,8 @@ window.openSrc = (enc) =>
     if (!d.ok) console.warn("open failed:", d.error);
   }).catch(() => {});
 
-/* 项目生命周期归类：静态配置，跟着前端文件走（契约层的字段归洄裁决，
-   等她长出正式字段就换数据源——提案已在 session-spoor-review 落账） */
-let LIFECYCLE = {};
-const LC_CLASSES = ["毕业", "里程碑", "生长", "胚胎"];
-fetch("lifecycle.json").then((r) => (r.ok ? r.json() : {})).then((d) => { LIFECYCLE = d; renderSidebar(); }).catch(() => {});
+/* 契约 v0.1：lifecycle/ecosystem/relates_to/milestones 全部来自 API 的
+   frontmatter 字段，前端只渲染不猜测。lifecycle.json 已退役（不 fetch）。 */
 
 /* ---------- 路由 ---------- */
 const VIEWS = ["home", "project", "docview"];
@@ -47,72 +44,52 @@ document.querySelectorAll(".back-btn").forEach((b) =>
 
 const count = (v) => Array.isArray(v) ? v.length : (v | 0);
 
-/* ---------- 侧栏：生命周期四类 + 档案房 ---------- */
-const ARCH_TAGS = ["毕业档案", "里程碑", "目录册", "胚胎"];
-async function docTag(d) {
-  for (const t of ARCH_TAGS) if (d.doc.includes(t)) return t;
-  try {
-    const full = await api("/api/archive/" + encodeURIComponent(d.doc));
-    const head = (full.content || "").split("\n").slice(0, 5).join("\n");
-    for (const t of ARCH_TAGS) if (head.includes(t)) return t;
-  } catch { }
-  return "";
-}
+/* ---------- 侧栏：生态分组 + lifecycle 徽章 / 档案房平铺 ---------- */
+const ECO_ORDER = ["portalk", "声海", "猎迹", "varia", ""];
+const ECO_NAMES = { portalk: "Portalk生态", "声海": "声海", "猎迹": "猎迹", varia: "varia", "": "未归属" };
 
 async function renderSidebar() {
-  // 项目：按生命周期四类
+  // 项目：ecosystem 树形分组（顶层）+ lifecycle 徽章（主状态），全读 API
   try {
     const projects = await api("/api/projects");
     const nav = $("#lifecycle-nav");
     nav.innerHTML = "";
-    for (const lc of LC_CLASSES) {
-      const group = projects.filter((p) => (LIFECYCLE[p.project] || "生长") === lc);
+    for (const eco of ECO_ORDER) {
+      const group = projects.filter((p) => (p.ecosystem || "") === eco);
+      if (!group.length) continue;
       const det = document.createElement("details");
-      det.open = group.length > 0;
+      det.open = true;
       det.innerHTML =
-        `<summary><span class="lc-name">${esc(lc)}</span>` +
+        `<summary><span class="lc-name">${esc(ECO_NAMES[eco])}</span>` +
         `<span class="lc-count">${group.length}</span></summary>`;
       const ul = document.createElement("ul");
       for (const p of group) {
         const li = document.createElement("li");
         li.innerHTML =
           `<a href="#/project/${encodeURIComponent(p.project)}">${esc(p.project)}` +
+          `<span class="tag lc">${esc(p.lifecycle || "生长")}</span>` +
           (count(p.pits) ? `<span class="tag pit">${count(p.pits)}坑</span>` : "") +
           (count(p.pending_review) ? `<span class="tag human">${count(p.pending_review)}待审</span>` : "") +
           `</a>`;
         ul.appendChild(li);
       }
-      if (!group.length) ul.innerHTML = `<li class="empty">——</li>`;
       det.appendChild(ul);
       nav.appendChild(det);
     }
+    if (!nav.innerHTML) nav.innerHTML = `<div class="empty">还没有项目。</div>`;
   } catch { }
 
-  // 档案房：按生命周期标签分组（名字里没有就读正文头部）
+  // 档案房：平铺（不按标签套娃——侧边栏已表达状态，信息不重复）
   const anav = $("#archive-nav");
   try {
-    const docs = await api("/api/archive");
-    const tags = await Promise.all(docs.map(docTag));
-    docs.forEach((d, i) => (d._tag = tags[i]));
+    const raw = await api("/api/archive");
+    const docs = Array.isArray(raw) ? raw : (raw.docs || []);
     let html = `<div class="anav-title">档案房</div>`;
-    if (!docs.length) html += `<div class="empty">（还空着）</div>`;
-    for (const tag of ARCH_TAGS) {
-      const group = docs.filter((d) => d._tag === tag);
-      if (!group.length) continue;
-      html += `<details open><summary><span class="lc-name">${esc(tag)}</span>` +
-        `<span class="lc-count">${group.length}</span></summary><ul>` +
-        group.map((d) =>
+    html += docs.length
+      ? `<ul class="flat">` + docs.map((d) =>
           `<li><a href="#/doc/${encodeURIComponent(d.doc)}" title="${d.versions} 个版本 · ${esc(d.ts)}">` +
-          `${d.pinned ? "📌 " : ""}${esc(d.doc)}</a></li>`).join("") +
-        `</ul></details>`;
-    }
-    const untagged = docs.filter((d) => !d._tag);
-    if (untagged.length)
-      html += `<details open><summary><span class="lc-name">未标</span>` +
-        `<span class="lc-count">${untagged.length}</span></summary><ul>` +
-        untagged.map((d) =>
-          `<li><a href="#/doc/${encodeURIComponent(d.doc)}">${d.pinned ? "📌 " : ""}${esc(d.doc)}</a></li>`).join("") +
-        `</ul></details>`;
+          `${d.pinned ? "📌 " : ""}${esc(d.doc)}</a></li>`).join("") + `</ul>`
+      : `<div class="empty">（还空着——还没长出来也是一种真实状态）</div>`;
     anav.innerHTML = html;
   } catch { anav.innerHTML = ""; }
 }
@@ -386,7 +363,7 @@ async function showProject(name) {
   show("project");
   projData = await api("/api/project/" + encodeURIComponent(name));
   $("#proj-name").textContent = projData.project || name;
-  $("#proj-lifecycle").textContent = LIFECYCLE[projData.project] || "生长";
+  $("#proj-lifecycle").textContent = projData.lifecycle || "生长";
   $("#proj-desc").textContent = projData.description || "";
   renderProjTabs();
   renderProjBody();
@@ -417,10 +394,17 @@ function renderProjBody() {
     (d.git && d.git.repo ? `<div class="meta" style="margin-top:8px">git: ${esc(d.git.repo)} @ ${esc(d.git.branch || "")}${d.git.dirty ? " · 有未提交" : ""}</div>` : "");
 
   if (projTab === "状态") {
+    const ms = d.milestones || [];
+    const rel = d.relates_to || [];
     box.innerHTML =
       (d.todo ? `<div class="card"><div class="meta">待办</div><div class="text">${esc(d.todo)}</div></div>` : "") +
       (d.blocked ? `<div class="card"><div class="meta">卡点</div><div class="text">${esc(d.blocked)}</div></div>` : "") +
-      (!d.todo && !d.blocked ? `<div class="empty">没有待办和卡点。</div>` : "");
+      (ms.length ? `<div class="card"><div class="meta">成就</div>` +
+        ms.map((m) => `<div class="mstone">🏆 ${esc(m)}</div>`).join("") + `</div>` : "") +
+      (rel.length ? `<div class="card"><div class="meta">关联项目</div>` +
+        rel.map((r) => `<div class="mstone"><a class="doclink" href="#/project/${encodeURIComponent(r.project)}">${esc(r.project)}</a>` +
+          ` <span class="fmeta">—— ${esc(r.relation)}</span></div>`).join("") + `</div>` : "") +
+      (!d.todo && !d.blocked && !ms.length && !rel.length ? `<div class="empty">没有待办和卡点。</div>` : "");
   } else if (projTab === "待审") {
     const es = (d.pending_review || []);
     box.innerHTML = es.length ? es.map(entryHtml).join("")
