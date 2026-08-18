@@ -270,14 +270,14 @@ LIFECYCLE_VALUES = {"毕业", "里程碑", "生长", "胚胎"}
 
 def _parse_frontmatter(text):
     """STATUS.md 头部的 YAML frontmatter（契约 v0.1）。
-    不引入 yaml 依赖：只认三个键，用行级解析。
+    不引入 yaml 依赖：行级解析（lifecycle/ecosystem/relates_to/milestones/docs）。
     lifecycle: 生长
     ecosystem: portalk
     relates_to:
       - project: tideline
         relation: 记忆层底座
     缺失/畸形 → 全部默认值，桥不因 frontmatter 问题 500。"""
-    fm = {"lifecycle": "生长", "ecosystem": "", "relates_to": [], "milestones": []}
+    fm = {"lifecycle": "生长", "ecosystem": "", "relates_to": [], "milestones": [], "docs": []}
     m = FRONTMATTER_RE.match(text)
     if not m:
         return fm
@@ -303,10 +303,21 @@ def _parse_frontmatter(text):
                 fm["milestones"] = []
             cur = "milestones"
             continue
+        md = re.match(r"^docs\s*:\s*(.*)$", line.strip())
+        if md:
+            if md.group(1).strip() == "[]":
+                fm["docs"] = []
+            cur = "docs"
+            continue
         if cur == "milestones":
             mi = re.match(r"^-\s*(.+)$", line.strip())
             if mi:
                 fm["milestones"].append(mi.group(1).strip())
+                continue
+        if cur == "docs":
+            di = re.match(r"^-\s*(.+)$", line.strip())
+            if di:
+                fm["docs"].append(di.group(1).strip())
                 continue
         if cur == "list":
             m4 = re.match(r"^-\s*project\s*:\s*(.+)$", line.strip())
@@ -342,7 +353,8 @@ def _parse_status(path):
             sections[key] = m.group(1).strip()
     return {"updated": updated, "priority": priority, "sections": sections,
             "lifecycle": fm["lifecycle"], "ecosystem": fm["ecosystem"],
-            "relates_to": fm["relates_to"], "milestones": fm["milestones"]}
+            "relates_to": fm["relates_to"], "milestones": fm["milestones"],
+            "docs": fm["docs"]}
 
 
 def _load_repos():
@@ -399,6 +411,7 @@ def _project(dirpath):
         "ecosystem": (status["ecosystem"] if status else ""),
         "relates_to": (status["relates_to"] if status else []),
         "milestones": (status["milestones"] if status else []),
+        "docs": (status["docs"] if status else []),
     }
     return {
         "project": dirpath.name,
@@ -409,6 +422,7 @@ def _project(dirpath):
         "ecosystem": meta["ecosystem"],
         "relates_to": meta["relates_to"],
         "milestones": meta["milestones"],
+        "docs": meta["docs"],
         "git": git,
         "todo": (status["sections"].get("下一步", "") if status else ""),
         "blocked": (status["sections"].get("卡在哪", "") if status else ""),
@@ -556,7 +570,7 @@ def overview():
 # ---------- HTTP ----------
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "spoor-view/0.1"
+    server_version = "spoor-view/0.2"
 
     def do_GET(self):
         path = self.path.split("?")[0]

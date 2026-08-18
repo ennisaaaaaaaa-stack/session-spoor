@@ -1,4 +1,4 @@
-# 桥-前端契约 v0.1
+# 桥-前端契约 v0.2
 
 > spoor_view.py（数据面）与 dashboard（渲染面）之间唯一的形状约定。
 > 改契约 = 改这份文档 + 桥实现 + 前端实现，三者同步，review 走 main。
@@ -21,16 +21,22 @@
 ```yaml
 ---
 lifecycle: 生长      # 毕业 | 里程碑 | 生长 | 胚胎
-ecosystem: portalk   # portalk | 声海 | 猎迹 | varia | ""
+ecosystem: portalk   # 自由值（本部署用 portalk/声海/猎迹/varia，空=未归属）
 relates_to:          # 横向关系（可选，边）
   - project: tideline
     relation: 记忆层底座
+milestones:          # 成就列表（可选）
+  - v2.4 全链路闭环（2026-08-09）
+docs:                # 显式档案归属（v0.2 新增，可选）——这个项目拥有哪些档案 doc
+  - tideline-v24-milestone
 ---
 # STATUS
 （正文照旧）
 ```
 
-frontmatter 缺失或字段缺失 → 默认 `lifecycle: 生长`、`ecosystem: ""`、`relates_to: []`（向后兼容）。
+frontmatter 缺失或字段缺失 → 默认 `lifecycle: 生长`、`ecosystem: ""`、`relates_to: []`、`milestones: []`、`docs: []`（向后兼容）。
+
+**v0.2 新增（甜心 2026-08-18 拍板）——docs 显式归属**：档案 doc 与项目的连线不再靠命名习惯猜。声明了至少一个 doc 的项目以声明为准（星图边 w:2，权威，前缀让位）；未声明或声明为空 → 退回名字前缀启发式（w:1）——零配置部署开箱仍有连线。注意：桥对未声明桌统一下发 `docs: []`，「显式空」与「未声明」在数据形状上不可区分，两者同等走兜底。开源可一键：语义层不绑命名习惯。
 
 **语义（甜心 2026-08-18 定）**：毕业=已归档；胚胎=未完成；生长=进行中；里程碑=已完成的部分。生态归属：Portalk生态={portalk, tideline, session spoor}；声海={ocean-listen, music box}。
 
@@ -53,7 +59,7 @@ frontmatter 缺失或字段缺失 → 默认 `lifecycle: 生长`、`ecosystem: "
 ## API 形状（冻结现状，v0.1 只加不改）
 
 - `GET /api/overview` → `{server_time, projects[], todos[], pending_review[], recent_events[], archive_docs, push_queue[], needs_attention[]}`
-- `GET /api/projects` → `[{project, description, status{updated, priority, sections{}}, git{}, todo, blocked, pending_review[], pits[], journal[], journal_total}]` + **v0.1 新增每项 `lifecycle, ecosystem, relates_to[]`（来自 frontmatter）**
+- `GET /api/projects` → `[{project, description, status{updated, priority, sections{}}, git{}, todo, blocked, pending_review[], pits[], journal[], journal_total}]` + **v0.1 每项 `lifecycle, ecosystem, relates_to[]`（来自 frontmatter）** + **v0.2 新增 `milestones[], docs[]`**
 - `GET /api/project/<name>` → 同上单项目
 - `GET /api/graph` → `{nodes[{doc, version_id, parent, bytes, source_ref}], edges[]}`
 - `GET /api/archive` → `{docs[]}`
@@ -63,12 +69,14 @@ frontmatter 缺失或字段缺失 → 默认 `lifecycle: 生长`、`ecosystem: "
 
 事件类型（overview.recent_events[].event）：`threesome.archive.put/link/get/query/verify`（ledger 事件）。前端 EV_ACTION 表里 journal.write/create/cleanup 等为本地桥方言，不在本契约内——生产前端遇到未知名按原样显示或「留下了痕迹」。
 
-## 项目间关系怎么到前端（映射草案）
+## 项目间关系怎么到前端（v0.2 定稿）
 
-1. **生态归属（树）** → 侧边栏顶层分组：portalk生态 / 声海 / 猎迹 / 未归属
-2. **生命周期（状态）** → 组内徽章或二级分组
-3. **relates_to（横向边）** → 星图加项目节点（生态=分区色）+ 项目页「关联项目」区
-4. **项目页 × 档案房 join** → /api/project/<name> 附带 `archive_docs[]`（按 doc 名前缀或 source_ref 匹配），ocean-listen 页不再空
+**甜心 2026-08-18 定轴：分层主轴 = 生命周期**（生长 → 里程碑 → 毕业 → 胚胎），生态降为组内徽章。「正常应该按生长/里程碑/毕业/胚胎做项目分层」——侧边栏现在的项目名平铺是错的层级。
+
+1. **生命周期（树）** → 侧边栏顶层分组，契约四值按叙事序；未知值透传垫底（不猜数据）
+2. **生态归属（徽章）** → 组内彩色徽章（颜色由名字哈希派生，零硬编码）+ 星图分区色
+3. **relates_to（横向边）** → 星图加项目节点 + 项目页「关联项目」区
+4. **项目页 × 档案房 join** → `docs:` 显式声明（w:2 权威）+ 名字前缀兜底（w:1，仅未声明者）；项目页新增「档案」区列出声明的 doc
 
 ## 变更流程
 
