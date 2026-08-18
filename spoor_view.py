@@ -470,6 +470,57 @@ def _push_detail(g):
     return "；".join(bits)
 
 
+def scratch_view():
+    """涂鸦房只读视图（契约 v0.1：200+空=空态，404=隐藏）。
+
+    存储是平铺的 {root}/scratch/（space_id 概念在 MCP server 内部，
+    磁盘上无子目录层）→ 聚合成单 space；事件尾巴取 ledger 近 20 条
+    create/cleanup/write 类事件。"""
+    root = ROOT / "scratch"
+    spaces = []
+    if root.is_dir():
+        files = []
+        for f in root.iterdir():
+            if f.is_file() and not f.name.startswith("."):
+                st = f.stat()
+                mtime = time.strftime("%m-%d %H:%M", time.localtime(st.st_mtime))
+                files.append({
+                    "name": f.name,
+                    "bytes": st.st_size,
+                    "mtime": mtime,
+                })
+        if files:
+            spaces.append({"space": "root", "files": files})
+    events = []
+    try:
+        for e in ledger_tail(60):
+            ev = e.get("event", "")
+            if any(k in ev for k in ("create", "cleanup", "write")):
+                events.append({
+                    "ts": e.get("ts", ""),
+                    "kind": ev,
+                    "agent": e.get("agent", ""),
+                    "space": e.get("space", ""),
+                    "detail": e.get("detail", ""),
+                })
+    except Exception:
+        pass
+    return {"spaces": spaces, "events": events}
+
+
+def heatmap_days():
+    """活动热力图日计数（契约 v0.1）：ledger 每事件一行，ts 前 10 字符=日期。"""
+    days = {}
+    try:
+        for e in ledger_tail(500):
+            d = (e.get("ts") or "")[:10]
+            if d:
+                days[d] = days.get(d, 0) + 1
+    except Exception:
+        pass
+    return {"days": days}
+
+
 def overview():
     projects = workbench_projects()
     return {
@@ -532,6 +583,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/overview":
                 data = overview()
+            elif path == "/api/scratch":
+                data = scratch_view()
+            elif path == "/api/heatmap":
+                data = heatmap_days()
             elif path == "/api/projects":
                 data = workbench_projects()
             elif path == "/api/graph":
