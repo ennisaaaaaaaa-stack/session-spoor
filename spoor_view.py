@@ -23,6 +23,7 @@ import subprocess
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote as _urlquote
 
 # 环境变量化（照照 8/18 的结构性观察）：桥不该绑死在"VPS 部署脚本"身份上。
 # 第二台机器（WSL/本地 clone）可指向自己的档案根复现/自测；默认值不变。
@@ -577,6 +578,8 @@ class Handler(BaseHTTPRequestHandler):
             ):
                 self._html(403, FORBIDDEN_HTML)
                 return
+            # 认证通过 → 挂到 self，供 index.html 改写（资产+API 不再依赖 cookie）
+            self._token_for_rewrite = required
             # token 从 query 来且合法 → 种 cookie，下次裸开即可
             if m and m.group(1):
                 self._cookie_value = supplied
@@ -631,6 +634,32 @@ class Handler(BaseHTTPRequestHandler):
                 return
         if candidate.is_file():
             body = candidate.read_bytes()
+            # index.html 即时改写：资产与 API 自动带 token（cookie 被代理/浏览器吞掉的场景）
+            if rel == "" or rel == "index.html":
+                try:
+                    text = body.decode("utf-8")
+                    tok = getattr(self, "_token_for_rewrite", None)
+                    if tok:
+                        q = _urlquote(tok, safe="")
+                        text = text.replace(
+                            'href="style.css"', f'href="style.css?token={q}"'
+                        ).replace(
+                            'src="app.js"', f'src="app.js?token={q}"'
+                        )
+                        inject = (
+                            "<script>/* bridge-injected: keep token on every fetch */"
+                            "(function(){var m=new URLSearchParams(location.search).get('token');"
+                            "if(!m){var c=document.cookie.match(/(?:^|;)\\\\s*spoor_token=([^;]*)/);if(c)m=c[1];}"
+                            "if(m){var of=window.fetch;window.fetch=function(u,o){"
+                            "u=String(u);if(u.indexOf('token=')<0){"
+                            "u+=(u.indexOf('?')<0?'?':'&')+'token='+encodeURIComponent(m);}"
+                            "return of.call(window,u,o);};}})();</script>"
+                        )
+                        # 注入在 </head> 前，抢在 app.js 加载前
+                        text = text.replace("</head>", inject + "</head>", 1)
+                    body = text.encode("utf-8")
+                except Exception:
+                    pass  # 改写失败 → 原样伺服，不让静态改写炸掉页面
             self._send_common(200, body, MIME.get(candidate.suffix.lower(), "application/octet-stream"))
         elif not rel:
             # 占位页：前端还没来，告诉访客桥活着
