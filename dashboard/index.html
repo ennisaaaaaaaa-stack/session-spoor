@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>猎迹 · Session Spoor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="bg" aria-hidden="true"></div>
+
+<aside id="sidebar">
+  <div class="brand" id="brand">
+    <h1>Session&nbsp;Spoor</h1>
+    <p class="sub">猎迹 · Sessions die. Trails don't.</p>
+  </div>
+  <nav id="lifecycle-nav"></nav>
+  <nav id="archive-nav"></nav>
+</aside>
+
+<main id="home">
+  <section id="todo-section">
+    <h2>待办 <span class="hint">各项目的下一步 · 读自 STATUS.md</span></h2>
+    <div id="todo-list" class="cards"></div>
+  </section>
+
+  <section>
+    <h2>待审 <span class="hint">待审·人 —— 等你拍板的</span></h2>
+    <div id="review-list" class="cards"></div>
+  </section>
+
+  <section>
+    <h2>链接图 <span class="hint">谁在哪里留下了痕迹</span></h2>
+    <div id="graph-wrap"><svg id="graph" viewBox="0 0 880 380"></svg></div>
+  </section>
+
+  <section>
+    <h2>涂鸦房 <span class="hint">文字留下又擦除，一部分沉淀下来 · 每 3 秒刷新</span></h2>
+    <div id="scratch"></div>
+  </section>
+
+  <section>
+    <h2>痕迹 <span class="hint">每天的密度 · 悬停看日期</span></h2>
+    <div id="heatmap"></div>
+  </section>
+
+  <section>
+    <h2>自上次以来 <span class="hint" id="feed-hint">最近一天的动静</span></h2>
+    <div id="feed"></div>
+  </section>
+</main>
+
+<main id="project" class="hidden">
+  <button class="back-btn" title="返回主页">← 主页</button>
+  <header id="proj-header">
+    <h2 id="proj-name"></h2>
+    <span id="proj-lifecycle" class="tag"></span>
+    <p id="proj-desc" class="sub"></p>
+  </header>
+  <div id="proj-status" class="card"></div>
+  <nav id="proj-tabs"></nav>
+  <div id="proj-body"></div>
+</main>
+
+<main id="docview" class="hidden">
+  <button class="back-btn" title="返回主页">← 主页</button>
+  <header id="doc-header">
+    <h2 id="doc-name"></h2>
+    <span id="doc-tag" class="tag"></span>
+  </header>
+  <div id="doc-meta" class="meta-line"></div>
+  <div class="card"><pre id="doc-body" class="ftext"></pre></div>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
