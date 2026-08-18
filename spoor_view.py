@@ -701,7 +701,17 @@ class Handler(BaseHTTPRequestHandler):
         self._send_common(code, body, "application/json; charset=utf-8")
 
     def log_message(self, fmt, *args):
-        print(f"[spoor-view] {self.address_string()} {fmt % args}", flush=True)
+        # cookieless 链的 token 走 query——日志永不记 query 串，也不兜底打印 token 值。
+        # 日志可能被备份/第三方读到，token 不进日志（照照 feedback 2026-08-19）。
+        safe_args = []
+        for a in args:
+            # 请求行 'GET /path?query HTTP/1.1'（引号在 fmt 里，不在参数里）→ 剥掉 ?query
+            if isinstance(a, str) and " HTTP/" in a and " " in a:
+                head, _, tail = a.partition(" HTTP/")
+                safe_args.append(head.split("?", 1)[0] + " HTTP/" + tail)
+            else:
+                safe_args.append(a)
+        print(f"[spoor-view] {self.address_string()} {fmt % tuple(safe_args)}", flush=True)
 
 
 def urllib_parse_unquote(s):

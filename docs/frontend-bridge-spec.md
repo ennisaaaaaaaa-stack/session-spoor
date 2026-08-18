@@ -65,3 +65,5 @@ GET /api/graph         → 节点+边（archive_link）
 1. 字节数对不上别慌：档案正文按UTF-8字节算，JSON里是字符串，长度按字符数会差一截。
 2. `待审·人`队列的质量取决于agent标记得勤不勤——这是纪律问题不是技术问题，洄这边保证习惯。
 3. 胚胎期项目的doc会很少甚至一行——空态设计要做，"还没长出来"也是一种真实状态。
+4. cookieless 改写是在 server 侧改写 index.html 注入 script，前提是 dashboard/ 内容完全可信（我们自己写的）。若将来 dashboard/ 开放给外部贡献者改，这一注入面会叠加在 HTML 注入面上——届时需要重新评估改写链（比如改为构建期注入或改为纯前端读 query）。（照照 feedback 2026-08-19）
+5. token 走 query（cookieless 链的代价），桥的访问日志已改为永不记录 query 串——token 不进日志文件。
