@@ -129,7 +129,8 @@ def workbench_status(project: str, text: str = "") -> str:
     p = _proj(project)
     f = p / "STATUS.md"
     if not text:
-        return f.read_text(encoding="utf-8") if f.exists() else "(no status yet)"
+        body = f.read_text(encoding="utf-8") if f.exists() else "(no status yet)"
+        return spoor_common.nudge_text(body)  # v0.4.1: 状态查询是高频动作，nudge 搭车
     f.write_text(f"# STATUS · 更新于 {_now()}\n\n{text}\n", encoding="utf-8")
     _index_write()
     return json.dumps({"ok": True, "written": len(text)})
@@ -181,7 +182,8 @@ def workbench_read_journal(project: str, mark: str = "", limit: int = 30, reason
     entries = entries[-limit:]
     _ledger({"event": "threesome.journal.read", "project": project, "mark": mark or None,
              "limit": limit, "reason": reason or None, "entries": len(entries)})
-    return "\n".join(f"{d} | {ln}" for d, ln in entries) if entries else "(empty)"
+    body = "\n".join(f"{d} | {ln}" for d, ln in entries) if entries else "(empty)"
+    return spoor_common.nudge_text(body)  # v0.4.1: 开工仪式读坑是必经动作，nudge 搭车
 
 @mcp.tool()
 def workbench_snippet(project: str, name: str, content: str = "") -> str:

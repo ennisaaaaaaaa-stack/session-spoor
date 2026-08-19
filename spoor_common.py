@@ -155,3 +155,99 @@ def append_journal(jf: Path, line: str) -> None:
         p.write_text(content + line + "\n", encoding="utf-8")
 
     _with_lock(jf, _do)
+
+
+# ---- v0.4.1 nudge：journal 久未写的搭车提醒 ----
+# 动机：写入纪律在熟悉的 runtime（常驻 skill+SOUL）里靠自觉成立，
+# 陌生 runtime（kimi code 等）没这层文化，journal 静默断流。
+# 设计原则（按甜心的维护观）：搭现有动作的便车，不新建仪式——
+# 提醒不弹通知、不占频道，只出现在 agent 本来就会读的工具返回尾部。
+# 防免疫：只在超期时出现（每次都挂横幅，三天它就成了家具）；
+# 防唠叨：2h 冷却；可审计：提醒闪过本身进账本（spoor.nudge.shown，
+# 基础设施域前缀——threesome. 是三人协作域，spoor. 是设施自身的呼吸）。
+# 失败纪律：提醒层的任何异常一律静默——它没有资格弄坏主功能的返回。
+NUDGE_AFTER_H = 4.0      # journal.write 距今超过此小时数才提醒
+NUDGE_COOLDOWN_H = 2.0   # 上次提醒距今不足此小时数则静默
+NUDGE_SCAN_LINES = 500   # 账本只倒序扫这么多行（性能地板，老账不翻）
+
+
+def _nudge_text(age_h) -> str:
+    head = "workbench journal 从未写过" if age_h is None else f"workbench journal 已 {age_h:.0f}h 未写"
+    return (f"[nudge] {head}。收工前 workbench_journal 留一条"
+            f"（mark: 坑/判断/数据，一句话即可）——journal 是下个 session 的交接凭据。")
+
+
+def pending_nudge() -> "str | None":
+    """journal 久未写时返回提醒文本，否则 None。
+
+    账本就是传感器：不需要新状态文件，journal 写没写、提醒闪没闪
+    ledger.jsonl 自己全知道。逻辑：
+    - 最新一条 threesome.journal.write 距今 >= NUDGE_AFTER_H → 提醒
+    - 在用 workbench（有账本事件或有 workbench 目录）但从未写 journal → 提醒（新环境引导）
+    - 最新一条 spoor.nudge.shown 距今 < NUDGE_COOLDOWN_H → 冷却中，静默
+    - 账本缺失且无 workbench 目录 → 没人在用，不多嘴
+    """
+    try:
+        lines: list = []
+        if LEDGER.exists():
+            with open(LEDGER, encoding="utf-8", errors="replace") as f:
+                lines = [l for l in f if l.strip()][-NUDGE_SCAN_LINES:]
+        last_write = None   # 最新 journal.write 的 ts
+        last_shown = None   # 最新 nudge.shown 的 ts
+        for raw in reversed(lines):
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                continue    # 脏行不炸（与 ledger_query 同纪律）
+            ev = obj.get("event", "")
+            if last_write is None and ev == "threesome.journal.write":
+                last_write = obj.get("ts", "")
+            if last_shown is None and ev == "spoor.nudge.shown":
+                last_shown = obj.get("ts", "")
+            if last_write and last_shown:
+                break
+        now = time.time()
+
+        def _age(ts):
+            try:
+                return (now - time.mktime(time.strptime(ts, "%Y-%m-%dT%H:%M:%S"))) / 3600.0
+            except (ValueError, TypeError, OverflowError):
+                return None
+
+        if last_shown is not None:
+            age_s = _age(last_shown)
+            if age_s is not None and age_s < NUDGE_COOLDOWN_H:
+                return None
+        in_use = bool(lines) or (ROOT / "workbench").exists()
+        if last_write is None:
+            return _nudge_text(None) if in_use else None
+        age_w = _age(last_write)
+        if age_w is not None and age_w >= NUDGE_AFTER_H:
+            return _nudge_text(age_w)
+        return None
+    except Exception:
+        return None
+
+
+def nudge_json(payload: dict) -> str:
+    """JSON 工具返回搭车：pending 时注入 _nudge 字段（不改原字段，json.loads 消费方零影响）。"""
+    try:
+        n = pending_nudge()
+        if n:
+            payload["_nudge"] = n
+            append_ledger({"event": "spoor.nudge.shown", "ch": "json"})
+    except Exception:
+        pass
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def nudge_text(s: str) -> str:
+    """纯文本工具返回搭车：pending 时追加一行（格式统一 [nudge] 前缀，便于消费方识别与剥离）。"""
+    try:
+        n = pending_nudge()
+        if n:
+            append_ledger({"event": "spoor.nudge.shown", "ch": "text"})
+            return f"{s}\n{n}"
+    except Exception:
+        pass
+    return s
