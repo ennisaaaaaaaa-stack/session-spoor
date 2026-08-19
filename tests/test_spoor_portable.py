@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """session-spoor v0.2 回归测试：stdio transport 全工具 + v0.2 新契约。"""
-import asyncio, json, os, shutil, sqlite3, sys, tempfile, traceback
+import asyncio, json, os, shutil, sqlite3, sys, tempfile, time as _t, traceback
 from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -207,6 +207,40 @@ async def workbench_suite():
                 encoding="utf-8")
             rjm = await call(s, "workbench_read_journal", project="stigmergy", mark="坑", limit=2)
             check("limit takes newest", "FTS trigger" in rjm and "旧坑0" not in rjm, rjm[:200])
+
+            # ---- v0.4.1 nudge：journal 久未写 → 读类工具返回尾部搭一行 [nudge] ----
+            # 前提：本 suite 此刻刚写过 journal（j1 等），距上次 write < 4h → 不提醒。
+            rjn = await call(s, "workbench_read_journal", project="stigmergy")
+            check("[v0.4.1] fresh journal → no nudge", "[nudge]" not in rjn, rjn[-120:])
+            # 伪造超期：把最新 journal.write 的 ts 拨回 6 小时前（直接改账本，等价于"过了6小时"）
+            # 注意 nudge.shown 也要一起拨——suite 开头的 status 读在首条 journal 之前，
+            # 曾以"从未写过"闪过一次 nudge，2h 冷却会压住这里的超期测试
+            led_path = Path(ROOT, "ledger.jsonl")
+            _led = led_path.read_text(encoding="utf-8").splitlines()
+            _old_ts = _t.strftime("%Y-%m-%dT%H:%M:%S", _t.localtime(_t.time() - 6 * 3600))
+            _out = []
+            for _l in _led:
+                if '"threesome.journal.write"' in _l or '"spoor.nudge.shown"' in _l:
+                    _l = json.loads(_l)
+                    _l["ts"] = _old_ts
+                    _l = json.dumps(_l, ensure_ascii=False)
+                _out.append(_l)
+            led_path.write_text("\n".join(_out) + "\n", encoding="utf-8")
+            rjn2 = await call(s, "workbench_read_journal", project="stigmergy")
+            check("[v0.4.1] stale journal → nudge appended", "[nudge]" in rjn2 and "FTS trigger" in rjn2, rjn2[-160:])
+            # 冷却：上一次 nudge.shown 刚记（<2h）→ 再读不再提醒（防唠叨）
+            rjn3 = await call(s, "workbench_read_journal", project="stigmergy")
+            check("[v0.4.1] cooldown suppresses repeat nudge", "[nudge]" not in rjn3, rjn3[-120:])
+            # 恢复账本：把 ts 拨回现在，后续断言（契约事件检查）不受伪造影响
+            _now_ts = _t.strftime("%Y-%m-%dT%H:%M:%S")
+            _out = [json.dumps({**json.loads(_l), **({"ts": _now_ts} if '"threesome.journal.write"' in _l else {})},
+                               ensure_ascii=False) if _l.strip().startswith("{") else _l for _l in led_path.read_text(encoding="utf-8").splitlines()]
+            led_path.write_text("\n".join(_out) + "\n", encoding="utf-8")
+            # nudge 事件本身已入账（审计层：设施自己的呼吸也留痕）
+            # 预期两条：suite 开头 status 读的"从未写过"引导 + rjn2 的超期提醒，均走 text 通道
+            _nudges = [json.loads(_l) for _l in led_path.read_text(encoding="utf-8").splitlines()
+                       if '"spoor.nudge.shown"' in _l]
+            check("[v0.4.1] nudge shown is ledgered", len(_nudges) == 2 and all(n.get("ch") == "text" for n in _nudges), str(_nudges)[:200])
 
             # ---- v0.3.1 FTS降级：短query/空query + 过滤维度 ≠ 空手而归 ----
             # trigram最小粒度3：query="坑"(1字)原本永远no hits——开工先读坑仪式直接失效
