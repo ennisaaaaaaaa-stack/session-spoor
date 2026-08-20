@@ -66,8 +66,8 @@ Agent的session结束，过程就蒸发了。临时文件散在/tmp，进行中�
 # agent A（比如照夜）
 SPOOR_AGENT=照夜 STIGMERGY_ROOT=~/spoor workbench_server.py
 
-# agent B（比如洄游）——同一个root
-SPOOR_AGENT=洄游 STIGMERGY_ROOT=~/spoor workbench_server.py
+# agent B（比如 hui）——同一个root
+SPOOR_AGENT=hui STIGMERGY_ROOT=~/spoor workbench_server.py
 ```
 
 - journal行自动盖戳：`- **[坑]** (照夜) 2026-08-15 10:00 ...`
