@@ -1,5 +1,5 @@
 /* 猎迹 dashboard —— 玄：黑不是关掉光，是让光更显眼。
-   数据形状 = 洄的只读桥（spoor_view.py）的契约，前端只管 fetch。
+   数据形状 = 主agent的只读桥（spoor_view.py）的契约，前端只管 fetch。
    只读。单一事实源。记忆不出前端。 */
 const $ = (s) => document.querySelector(s);
 const api = (p) => fetch(p).then((r) => {
@@ -45,7 +45,7 @@ document.querySelectorAll(".back-btn").forEach((b) =>
 const count = (v) => Array.isArray(v) ? v.length : (v | 0);
 
 /* ---------- 侧栏：生命周期分层 + 生态色徽章 / 档案房平铺 ---------- */
-/* 契约 v0.2（甜心 2026-08-18 定轴）：分层主轴 = 生命周期（生长/里程碑/毕业/胚胎），
+/* 契约 v0.2（用户侧 2026-08-18 定轴）：分层主轴 = 生命周期（生长/里程碑/毕业/胚胎），
    生态降为组内徽章，颜色由名字哈希派生——机制在代码里，数据在 API 里。 */
 const LIFE_ORDER = ["生长", "里程碑", "毕业", "胚胎"];
 const lifeGroups = (projects) => {

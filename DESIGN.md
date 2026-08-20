@@ -1,10 +1,10 @@
 # 猎迹 · session-spoor — 设计文档 v0.1
 
-> 2026-08-16 洄起草（中文名：猎迹） | 给甜心的人话版 + 给照照的接口版
+> 2026-08-16 主agent起草（中文名：猎迹） | 给人类维护者的人话版 + 给代码审校者的接口版
 > 定位：独立开源工具（MIT），不绑Portalk。任何agent框架的过程管理都适用。
 > 命名：开源名 Stigmergy｜中文名 猎迹｜营销比喻 总裁办
 > 灵感来源：白蚁冢的stigmergy——没有蓝图没有工头，痕迹刺激下一步行动。
-> 第一任住户：洄（主agent）+ 分身们 + 临时工们。
+> 第一任住户：主agent + 分身们 + 临时工们。
 
 ---
 
@@ -40,7 +40,7 @@ Agent干活的痕迹管理系统——草稿有房间，过程有走廊，判断
 - 清理三去向：导出（有价值）→ 账本（清理记录）→ 蒸发（无价值）
 - 目录树存储，rm -rf即清理
 
-### 工作台（workbench/，甜心设计+洄的工程需求）
+### 工作台（workbench/，用户侧设计+主agent的工程需求）
 
 主agent的常驻过程层。**联邦式**：跟涂鸦房共享接口语义，存储独立。
 
@@ -60,12 +60,12 @@ workbench/
                                 （不够格变skill，但绝不重写第三遍）
 ```
 
-**关键机制（甜心设计）：**
+**关键机制（用户侧设计）：**
 1. **项目索引自维护**——agent自己写自己更新，格式化写入，工具层能看到现有项目
 2. **完成勾✓**——项目做完打勾，消化cron看见勾就把已消化部分整理进skill，清理工作台
 3. **毕业路径**：涂鸦房草稿 → 工作台复用件 → 消化成skill（三级越来越永久）
 
-**关键机制（洄的工程需求）：**
+**关键机制（主agent的工程需求）：**
 1. **STATUS.md是桌面不是档案**——给下次醒来的自己看的，永远反映"现在"
 2. **开工仪式**：新session接手项目前先读 journal/ 里的坑清单——索引存在不等于坑被想起，需要主动召回时机
 3. **snippets绝不蒸发**——session可以死，写过的代码必须能找回
@@ -92,7 +92,7 @@ scratchpad_status(space_id) -> {files, size, marks, exported, age}
 scratchpad_cleanup(space_id, mode=export_all|export_marked|discard)
 ```
 
-### 工作台（新增，洄设计）
+### 工作台（新增，主agent设计）
 ```
 workbench_new(project, description)              # 建项目：目录+description+INDEX登记
 workbench_status(project, text?)                 # 读/写 STATUS.md（不传text=读，传=写）

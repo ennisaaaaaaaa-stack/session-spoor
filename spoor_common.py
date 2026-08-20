@@ -160,7 +160,7 @@ def append_journal(jf: Path, line: str) -> None:
 # ---- v0.4.1 nudge：journal 久未写的搭车提醒 ----
 # 动机：写入纪律在熟悉的 runtime（常驻 skill+SOUL）里靠自觉成立，
 # 陌生 runtime（kimi code 等）没这层文化，journal 静默断流。
-# 设计原则（按甜心的维护观）：搭现有动作的便车，不新建仪式——
+# 设计原则（用户侧维护观裁决）：搭现有动作的便车，不新建仪式——
 # 提醒不弹通知、不占频道，只出现在 agent 本来就会读的工具返回尾部。
 # 防免疫：只在超期时出现（每次都挂横幅，三天它就成了家具）；
 # 防唠叨：2h 冷却；可审计：提醒闪过本身进账本（spoor.nudge.shown，
@@ -178,7 +178,7 @@ def _nudge_text(age_h) -> str:
 
 
 # ---- v0.4.2 跨项目 nudge：钩子只提醒，裁判是 agent ----
-# 动机（2026-08-20 甜心裁决）：一个 session 跨项目触达（如微信 session 里
+# 动机（2026-08-20 用户侧裁决）：一个 session 跨项目触达（如微信 session 里
 # 调了 workbench_journal）时，账本元数据已全量自动记录（谁/何时/碰了哪个
 # 项目——append_ledger 本来就写），但"这段跨项目内容要不要写进项目
 # journal"的判断权不归代码。钩子的职责边界：提供通道+提醒，不写内容。

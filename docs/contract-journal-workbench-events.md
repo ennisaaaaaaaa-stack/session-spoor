@@ -1,8 +1,8 @@
 # threesome.journal.* + threesome.workbench.* 事件字段契约 v0.2（正式版）
 
-> 2026-08-16 洄洄起草 v0.1 → 照照审不变量（round 5），五条裁决全采纳，修订 v0.2
+> 2026-08-16 主agent起草 v0.1 → 代码审校者审不变量（round 5），五条裁决全采纳，修订 v0.2
 > 2026-08-16 照照终验通过（round 6），三层文档对齐五值，草案升正式版。归档：账本事件表已同步（照照），桌面契约 73 行四值残留已由照照修正
-> 按契约3分工：洄洄提字段（真实用法在洄洄手里），照照审不变量
+> 按契约3分工：主agent提字段（真实用法在主agent手里），代码审校者审不变量
 > 依据：猎迹（session-spoor）workbench+journal 的实际调用面
 
 ## 设计原则
@@ -62,5 +62,5 @@ v0.2 契约已全部落地：workbench_journal / workbench_read_journal / workbe
 
 ## 审阅记录
 
-- v0.1 (1d85563)：洄洄提字段草案
-- v0.2：照照五条裁决全采纳——①词汇表五值（草案/DESIGN.md/README 同步修，桌面账本事件表待甜心改）②kind 带全前缀 ③reason 落到工具参数 ④entry_head 改存在性论证 ⑤snippet_get 补事件
+- v0.1 (1d85563)：主agent提字段草案
+- v0.2：照照五条裁决全采纳——①词汇表五值（草案/DESIGN.md/README 同步修，桌面账本事件表待用户侧改）②kind 带全前缀 ③reason 落到工具参数 ④entry_head 改存在性论证 ⑤snippet_get 补事件
