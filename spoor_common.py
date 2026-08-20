@@ -177,6 +177,57 @@ def _nudge_text(age_h) -> str:
             f"（mark: 坑/判断/数据，一句话即可）——journal 是下个 session 的交接凭据。")
 
 
+# ---- v0.4.2 跨项目 nudge：钩子只提醒，裁判是 agent ----
+# 动机（2026-08-20 甜心裁决）：一个 session 跨项目触达（如微信 session 里
+# 调了 workbench_journal）时，账本元数据已全量自动记录（谁/何时/碰了哪个
+# 项目——append_ledger 本来就写），但"这段跨项目内容要不要写进项目
+# journal"的判断权不归代码。钩子的职责边界：提供通道+提醒，不写内容。
+# 设计同 v0.4.1：搭返回的便车、不新建仪式；同一 nudge 冷却共享；
+# spoor.nudge.shown 带域标签（ch 字段）以便审计两种提醒各自频率。
+XPROJ_MIN_PROJECTS = 2   # 触达 ≥ 此数目的不同项目才构成"跨项目"
+
+XP_NUDGE_TEXT = (
+    "[nudge] 本 session 跨项目触达（{projects}）。跨 session 的内容要记进哪个"
+    "项目 journal，由 agent 裁决后主动 workbench_journal 写入；不涉及项目可不写。"
+)
+
+
+def _cross_project_nudge(lines: list) -> "str | None":
+    """扫最近账本行，聚合本次触达过的不同项目集合，≥2 则返回提醒文本。"""
+    try:
+        projects: "dict[str, str]" = {}
+        for raw in reversed(lines):
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            ev = str(obj.get("event", ""))
+            proj = obj.get("project")
+            if not proj:
+                continue
+            projects.setdefault(str(proj), obj.get("ts", ""))
+            # 只看最近窗口：从最新一条往回，跨项目检测是"当下状态"不是历史学
+            if len(projects) >= XPROJ_MIN_PROJECTS:
+                break
+        if len(projects) >= XPROJ_MIN_PROJECTS:
+            return XP_NUDGE_TEXT.format(projects="、".join(sorted(projects)))
+        return None
+    except Exception:
+        return None
+
+
+def pending_xnudge() -> "str | None":
+    """跨项目提醒入口（与 pending_nudge 同纪律：账本即传感器、静默失败）。"""
+    try:
+        lines: list = []
+        if LEDGER.exists():
+            with open(LEDGER, encoding="utf-8", errors="replace") as f:
+                lines = [l for l in f if l.strip()][-NUDGE_SCAN_LINES:]
+        return _cross_project_nudge(lines)
+    except Exception:
+        return None
+
+
 def pending_nudge() -> "str | None":
     """journal 久未写时返回提醒文本，否则 None。
 
@@ -186,6 +237,7 @@ def pending_nudge() -> "str | None":
     - 在用 workbench（有账本事件或有 workbench 目录）但从未写 journal → 提醒（新环境引导）
     - 最新一条 spoor.nudge.shown 距今 < NUDGE_COOLDOWN_H → 冷却中，静默
     - 账本缺失且无 workbench 目录 → 没人在用，不多嘴
+    - v0.4.2：journal 提醒静默/缺席时，检查跨项目触达（同冷却共享）
     """
     try:
         lines: list = []
@@ -217,14 +269,45 @@ def pending_nudge() -> "str | None":
         if last_shown is not None:
             age_s = _age(last_shown)
             if age_s is not None and age_s < NUDGE_COOLDOWN_H:
-                return None
+                # journal 提醒冷却中——但跨项目提醒独立判断（ch=xproj
+                # 单独记账，不与 ch=text/json 抢冷却：跨项目状态可能
+                # 在 journal 提醒冷却期内新出现）
+                return pending_xnudge_coolcheck(lines)
         in_use = bool(lines) or (ROOT / "workbench").exists()
         if last_write is None:
-            return _nudge_text(None) if in_use else None
+            if in_use:
+                return _nudge_text(None)
+            return None
         age_w = _age(last_write)
         if age_w is not None and age_w >= NUDGE_AFTER_H:
             return _nudge_text(age_w)
+        # journal 纪律良好（刚写过）——检查跨项目触达
+        return _cross_project_nudge(lines)
+    except Exception:
         return None
+
+
+def pending_xnudge_coolcheck(lines: list) -> "str | None":
+    """冷却旁路：只按 spoor.nudge.shown ch=xproj 的独立冷却判断跨项目提醒。"""
+    try:
+        last_xshown = None
+        for raw in reversed(lines):
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("event") == "spoor.nudge.shown" and obj.get("ch") == "xproj":
+                last_xshown = obj.get("ts", "")
+                break
+        if last_xshown is not None:
+            now = time.time()
+            try:
+                age = (now - time.mktime(time.strptime(last_xshown, "%Y-%m-%dT%H:%M:%S"))) / 3600.0
+            except (ValueError, TypeError, OverflowError):
+                age = None
+            if age is not None and age < NUDGE_COOLDOWN_H:
+                return None
+        return _cross_project_nudge(lines)
     except Exception:
         return None
 
@@ -235,7 +318,7 @@ def nudge_json(payload: dict) -> str:
         n = pending_nudge()
         if n:
             payload["_nudge"] = n
-            append_ledger({"event": "spoor.nudge.shown", "ch": "json"})
+            _record_shown(n)
     except Exception:
         pass
     return json.dumps(payload, ensure_ascii=False)
@@ -246,8 +329,17 @@ def nudge_text(s: str) -> str:
     try:
         n = pending_nudge()
         if n:
-            append_ledger({"event": "spoor.nudge.shown", "ch": "text"})
+            _record_shown(n)
             return f"{s}\n{n}"
     except Exception:
         pass
     return s
+
+
+def _record_shown(nudge: str) -> None:
+    """记账提醒闪过。ch 按内容分流：跨项目提醒=xproj（独立冷却），其余=text/json 旧域。"""
+    try:
+        ch = "xproj" if "跨项目触达" in nudge else "text"
+        append_ledger({"event": "spoor.nudge.shown", "ch": ch})
+    except Exception:
+        pass
