@@ -130,18 +130,20 @@ def _with_lock(path: Path, write_fn):
     return write_fn(path)
 
 
-def append_ledger(event: dict) -> None:
-    """带锁的 ledger 追加。具名住户自动盖 agent 字段。"""
+def append_ledger(event: dict, root: "Path | None" = None) -> None:
+    """带锁的 ledger 追加。具名住户自动盖 agent 字段。root 可覆盖（测试隔离）。"""
     event["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
     n = agent_name()
     if n:
         event["agent"] = n
 
+    ledger = (Path(root) / "ledger.jsonl") if root else LEDGER
+
     def _do(p: Path) -> None:
         with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
-    _with_lock(LEDGER, _do)
+    _with_lock(ledger, _do)
 
 
 def append_journal(jf: Path, line: str) -> None:
@@ -224,6 +226,76 @@ def pending_xnudge() -> "str | None":
             with open(LEDGER, encoding="utf-8", errors="replace") as f:
                 lines = [l for l in f if l.strip()][-NUDGE_SCAN_LINES:]
         return _cross_project_nudge(lines)
+    except Exception:
+        return None
+
+
+# ---- v0.4.3 session gap：末尾检测进环境，出口仍是工具返回 ----
+# 动机（2026-08-23 现行犯案）：一下午全用 terminal/git 干活、零 spoor 工具
+# 调用——返回层 nudge 根本没机会弹（拉式传感器死了）。把检测搬到
+# on_session_end（壳层在 /new /reset CLI退出 gateway过期 时喊一声），
+# 纯机械 diff messages 路径签名 vs 账本 journal.write，缺口落账本
+# spoor.session.gap 事件；下个 session 的工具返回最前面优先浮现。
+# 纯逻辑在 spoor_hooks.py（零依赖，提案 docs/spoor-hooks-proposal.zh.md #2）。
+# 消费即记录：spoor.nudge.shown ch=sessgap，每条 gap 只浮现一次——
+# agent 裁决"不涉及可不写"后不再骚扰。失败静默纪律不变。
+
+
+def _load_spoor_hooks():
+    """按 __file__ 同目录加载 spoor_hooks——本模块常被插件按路径加载，
+    sys.path 里没有本目录，普通 import 会静默失败（cwd bug 表亲，
+    2026-08-23 现场抓的）。"""
+    import importlib.util, sys
+    if "spoor_hooks" in sys.modules:
+        return sys.modules["spoor_hooks"]
+    _p = Path(__file__).resolve().parent / "spoor_hooks.py"
+    _spec = importlib.util.spec_from_file_location("spoor_hooks", _p)
+    mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(mod)
+    sys.modules["spoor_hooks"] = mod
+    return mod
+
+
+def record_session_gap(messages: list, root=None) -> "str | None":
+    """session 末尾调用：算缺口、落账本。返回提醒文本或 None。"""
+    try:
+        spoor_hooks = _load_spoor_hooks()
+        r = Path(root) if root else ROOT
+        text = spoor_hooks.session_gap_nudge(messages, r)
+        if text:
+            projects = sorted(spoor_hooks.touched_projects(messages, r))
+            append_ledger({"event": "spoor.session.gap", "text": text,
+                           "projects": projects}, root=r)
+        return text
+    except Exception:
+        return None
+
+
+def pending_sessgap(lines: "list | None" = None) -> "str | None":
+    """最新 spoor.session.gap 未被消费（晚于最近一次 ch=sessgap 的 shown）则返回其文本。"""
+    try:
+        if lines is None:
+            if not LEDGER.exists():
+                return None
+            with open(LEDGER, encoding="utf-8", errors="replace") as f:
+                lines = [l for l in f if l.strip()][-NUDGE_SCAN_LINES:]
+        gap_ts = gap_text = None
+        shown_ts = None
+        for raw in reversed(lines):
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            ev = str(obj.get("event", ""))
+            if ev == "spoor.session.gap" and gap_ts is None:
+                gap_ts, gap_text = str(obj.get("ts", "")), str(obj.get("text", ""))
+            elif ev == "spoor.nudge.shown" and obj.get("ch") == "sessgap" and shown_ts is None:
+                shown_ts = str(obj.get("ts", ""))
+            if gap_ts is not None and shown_ts is not None:
+                break
+        if gap_ts and gap_ts > (shown_ts or ""):
+            return gap_text or None
+        return None
     except Exception:
         return None
 
@@ -315,6 +387,10 @@ def pending_xnudge_coolcheck(lines: list) -> "str | None":
 def nudge_json(payload: dict) -> str:
     """JSON 工具返回搭车：pending 时注入 _nudge 字段（不改原字段，json.loads 消费方零影响）。"""
     try:
+        g = pending_sessgap()
+        if g:
+            payload["_sessgap"] = g
+            _record_shown_ch("sessgap")
         n = pending_nudge()
         if n:
             payload["_nudge"] = n
@@ -327,6 +403,10 @@ def nudge_json(payload: dict) -> str:
 def nudge_text(s: str) -> str:
     """纯文本工具返回搭车：pending 时追加一行（格式统一 [nudge] 前缀，便于消费方识别与剥离）。"""
     try:
+        g = pending_sessgap()
+        if g:
+            _record_shown_ch("sessgap")
+            s = f"{s}\n{g}"
         n = pending_nudge()
         if n:
             _record_shown(n)
@@ -334,6 +414,14 @@ def nudge_text(s: str) -> str:
     except Exception:
         pass
     return s
+
+
+def _record_shown_ch(ch: str) -> None:
+    """记账某域提醒闪过（sessgap 用：消费即记录，不占 text/xproj 冷却）。"""
+    try:
+        append_ledger({"event": "spoor.nudge.shown", "ch": ch})
+    except Exception:
+        pass
 
 
 def _record_shown(nudge: str) -> None:
