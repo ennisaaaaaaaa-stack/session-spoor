@@ -28,6 +28,10 @@ def check(name, cond):
 def mk_root():
     root = Path(tempfile.mkdtemp(prefix="spoor_hooks_test_"))
     (root / "workbench").mkdir()
+    # 幽灵桌守卫（照照 8/23 审）后：BARE_NAMES 目标桌须真实存在才命中——
+    # 测试环境与生产同构，portalk/memory-wash 桌目录要建出来。
+    (root / "workbench" / "portalk").mkdir()
+    (root / "workbench" / "memory-wash").mkdir()
     (root / "workbench" / "repos.json").write_text(json.dumps({
         "portalk": "/home/ubuntu/Portalk",
         "tideline": "/home/ubuntu/tideline-memory",
@@ -96,16 +100,21 @@ t = sc.record_session_gap(m, root=r4)
 check("record落账本", t is not None and "portalk" in t)
 gap_line = [json.loads(l) for l in open(r4 / "ledger.jsonl", encoding="utf-8") if "spoor.session.gap" in l]
 check("gap事件在账本", len(gap_line) == 1 and gap_line[0]["projects"] == ["portalk"])
-g2 = sc.pending_sessgap()
+g2 = sc.pending_sessgap(root=r4)
 check("未消费→浮现", g2 is not None and "portalk" in g2)
 out = sc.nudge_text("工具正文")
 check("nudge_text搭车", "_nudge]" in out or "[nudge]" in out)
 shown = [json.loads(l) for l in open(r4 / "ledger.jsonl", encoding="utf-8") if '"ch": "sessgap"' in l]
 check("消费即记录", len(shown) == 1)
-g3 = sc.pending_sessgap()
+g3 = sc.pending_sessgap(root=r4)
 check("消费后→静默", g3 is None)
 os.environ["STIGMERGY_ROOT"] = str(Path.home() / "Stigmergy")
 importlib.reload(sc)
+# 照照审补充：root 参数化的正确性——不 reload 不改全局，直接传 root，
+# 与上面 reload+改全局的旧路径产出必须一致（同账本两种读法）。
+# r4 账本里 gap 已被 nudge_text 消费（ch=sessgap shown 在后）→ 两种读法都应静默。
+g4 = sc.pending_sessgap(root=r4)
+check("root参数=reload旧路径同结果(消费后静默)", g4 is None)
 
 print(f"\n{PASS} pass / {FAIL} fail")
 sys.exit(1 if FAIL else 0)

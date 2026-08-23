@@ -271,13 +271,18 @@ def record_session_gap(messages: list, root=None) -> "str | None":
         return None
 
 
-def pending_sessgap(lines: "list | None" = None) -> "str | None":
-    """最新 spoor.session.gap 未被消费（晚于最近一次 ch=sessgap 的 shown）则返回其文本。"""
+def pending_sessgap(lines: "list | None" = None, root=None) -> "str | None":
+    """最新 spoor.session.gap 未被消费（晚于最近一次 ch=sessgap 的 shown）则返回其文本。
+
+    root 参数与 append_ledger 同款隔离约定（照照 8/23 审）：生产不传走
+    模块全局 LEDGER，测试传临时目录——不再靠 reload+手改全局。
+    """
     try:
         if lines is None:
-            if not LEDGER.exists():
+            ledger = (Path(root) / "ledger.jsonl") if root else LEDGER
+            if not ledger.exists():
                 return None
-            with open(LEDGER, encoding="utf-8", errors="replace") as f:
+            with open(ledger, encoding="utf-8", errors="replace") as f:
                 lines = [l for l in f if l.strip()][-NUDGE_SCAN_LINES:]
         gap_ts = gap_text = None
         shown_ts = None
