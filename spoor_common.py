@@ -55,12 +55,19 @@ def check_sqlite_floor() -> None:
 def agent_name() -> str:
     """当前住户名。空 = 匿名（单住户模式）。
 
-    完全自定义：任何字符串都可以（UTF-8 支持中文名）。
-    开源场景——每个住户在**自己的环境变量**里声明自己的名字，
-    不存在任何写死的名单。fork 仓库的陌生人 set SPOOR_AGENT=自己的名字
-    即可署名，无需改任何代码。
+    读取顺序（照照 8/23 审的部署缺口，v0.4.4）：env 注入优先 →
+    $STIGMERGY_ROOT/agent.name 文件（每台机器写自己的名字，
+    gateway/watchdog/MCP/cron/临时脚本全进程生效，systemd unit
+    不用打 env 洞）→ 都没有 = 匿名。
+    开源场景——fork 仓库的陌生人任选其一即可署名，无需改代码。
     """
-    return os.environ.get("SPOOR_AGENT", "").strip()
+    n = os.environ.get("SPOOR_AGENT", "").strip()
+    if n:
+        return n
+    try:
+        return (ROOT / "agent.name").read_text(encoding="utf-8").strip()[:64]
+    except (OSError, ValueError):
+        return ""
 
 
 def stamped(now: str) -> str:
