@@ -77,7 +77,7 @@ def touched_projects(messages: list, root: Path) -> set:
     # Stigmergy 本体开发=memory-wash 桌（自举：自己的出生自己记）。
     # 幽灵桌守卫（照照 8/23 审）：目标桌在本机 workbench/ 不存在时跳过——
     # 跨机器部署时提醒一张本地写不了的桌是错误语义，不是降级。
-    BARE_NAMES = {"Agent-Grimoire": "portalk", "Stigmergy": "memory-wash"}
+    BARE_NAMES = {"Agent-Grimoire": "grimoire", "Stigmergy": "memory-wash"}
     for bare, desk in BARE_NAMES.items():
         if bare in text and (root / "workbench" / desk).is_dir():
             out.add(desk)
