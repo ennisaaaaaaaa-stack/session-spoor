@@ -117,9 +117,8 @@ importlib.reload(sc)
 # 与上面 reload+改全局的旧路径产出必须一致（同账本两种读法）。
 # r4 账本里 gap 已被 nudge_text 消费（ch=sessgap shown 在后）→ 两种读法都应静默。
 g4 = sc.pending_sessgap(root=r4)
-check("root参数=reload旧路径同结果(消费后静默)", g4 is None)
+check("root参数=reload旧路径同结果(消费后→静默)", g4 is None)
 
-print(f"\n{PASS} pass / {FAIL} fail")
 print("== v0.5 普适发现 ==")
 import shutil
 # 密封环境：假 home 下造假 git 目录，探测与真实机器解耦
@@ -164,4 +163,5 @@ check("真实冒烟:已知桌不是新项目", d_smoke == {})
 
 shutil.rmtree(fh)
 
+print(f"\n{PASS} pass / {FAIL} fail")
 sys.exit(1 if FAIL else 0)
