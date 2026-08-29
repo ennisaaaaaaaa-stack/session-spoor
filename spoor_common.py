@@ -264,15 +264,21 @@ def _load_spoor_hooks():
 
 
 def record_session_gap(messages: list, root=None) -> "str | None":
-    """session 末尾调用：算缺口、落账本。返回提醒文本或 None。"""
+    """session 末尾调用：算缺口、落账本。返回提醒文本或 None。
+
+    v0.5：gap 事件带 new_projects 字段（普适发现的新项目名）——
+    未裁决项目的提醒去重靠账本，不另立状态文件。
+    """
     try:
         spoor_hooks = _load_spoor_hooks()
         r = Path(root) if root else ROOT
         text = spoor_hooks.session_gap_nudge(messages, r)
         if text:
             projects = sorted(spoor_hooks.touched_projects(messages, r))
+            new_projects = sorted(spoor_hooks.discover_from_messages(messages, r))
             append_ledger({"event": "spoor.session.gap", "text": text,
-                           "projects": projects}, root=r)
+                           "projects": projects,
+                           "new_projects": new_projects}, root=r)
         return text
     except Exception:
         return None

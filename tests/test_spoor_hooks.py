@@ -29,9 +29,10 @@ def mk_root():
     root = Path(tempfile.mkdtemp(prefix="spoor_hooks_test_"))
     (root / "workbench").mkdir()
     # 幽灵桌守卫（照照 8/23 审）后：BARE_NAMES 目标桌须真实存在才命中——
-    # 测试环境与生产同构，portalk/memory-wash 桌目录要建出来。
+    # 测试环境与生产同构，四张会被 BARE_NAMES 命中的桌目录要建出来。
     (root / "workbench" / "portalk").mkdir()
     (root / "workbench" / "memory-wash").mkdir()
+    (root / "workbench" / "grimoire").mkdir()
     (root / "workbench" / "repos.json").write_text(json.dumps({
         "portalk": "/home/ubuntu/Portalk",
         "tideline": "/home/ubuntu/tideline-memory",
@@ -55,7 +56,7 @@ check("路径签名命中", sh.touched_projects(msgs("我看下 cd /home/ubuntu/
 check("多桌", sh.touched_projects(msgs("cd /home/ubuntu/Portalk/src 和 /home/ubuntu/tideline-memory 都要动"), r) == {"portalk", "tideline"})
 check("零触达", sh.touched_projects(msgs("今天聊了点别的"), r) == set())
 check("tool结果不扫", sh.touched_projects([{"role": "tool", "content": "/home/ubuntu/Portalk"}], r) == set())
-check("hardcode: Grimoire→portalk", sh.touched_projects(msgs("巡山 cd ~/Agent-Grimoire"), r) == {"portalk"})
+check("hardcode: Grimoire→grimoire", sh.touched_projects(msgs("巡山 cd ~/Agent-Grimoire"), r) == {"grimoire"})
 check("hardcode: Stigmergy→memory-wash", sh.touched_projects(msgs("cd /home/ubuntu/Stigmergy 改spoor_common"), r) == {"memory-wash"})
 check("multimodal list content", sh.touched_projects([{"role": "user", "content": [{"type": "text", "text": "去 /home/ubuntu/orbi-repo"}]}], r) == {"orbi"})
 
@@ -80,9 +81,11 @@ check("零触达→None", n5 is None)
 print("== 静默失败 ==")
 r3 = mk_root()
 (r3 / "workbench" / "repos.json").write_text("{broken json", encoding="utf-8")
-check("坏repos.json→零触达不炸", sh.session_gap_nudge(msgs("cd /home/ubuntu/Portalk"), r3, now=NOW) is None)
-check("messages=None→None", sh.session_gap_nudge(None, r3, now=NOW) is None)
-check("root不存在→None", sh.session_gap_nudge(msgs("cd /home/ubuntu/Portalk"), Path("/nonexistent/xx"), now=NOW) is None)
+# 普适发现（v0.5）会探测真实 home 的 .git——密封测试传假 home，探测必空。
+FAKE_HOME = Path(tempfile.mkdtemp(prefix="spoor_fake_home_"))
+check("坏repos.json→零触达不炸", sh.session_gap_nudge(msgs("cd /home/ubuntu/Portalk"), r3, now=NOW, home=FAKE_HOME) is None)
+check("messages=None→None", sh.session_gap_nudge(None, r3, now=NOW, home=FAKE_HOME) is None)
+check("root不存在→None", sh.session_gap_nudge(msgs("cd /home/ubuntu/Portalk"), Path("/nonexistent/xx"), now=NOW, home=FAKE_HOME) is None)
 
 print("== 管线集成（真实 spoor_common） ==")
 import spoor_common as sc
@@ -117,4 +120,48 @@ g4 = sc.pending_sessgap(root=r4)
 check("root参数=reload旧路径同结果(消费后静默)", g4 is None)
 
 print(f"\n{PASS} pass / {FAIL} fail")
+print("== v0.5 普适发现 ==")
+import shutil
+# 密封环境：假 home 下造假 git 目录，探测与真实机器解耦
+fh = Path(tempfile.mkdtemp(prefix="spoor_v05_home_"))
+(fh / "new-proj").mkdir(); (fh / "new-proj" / ".git").mkdir()
+(fh / "upstream-clone").mkdir(); (fh / "upstream-clone" / ".git").mkdir()
+(fh / "plain-dir").mkdir()  # 无 .git，不算项目
+r5 = mk_root()
+(r5 / "workbench" / "repos.json").write_text(json.dumps({
+    "portalk": "/home/ubuntu/Portalk",
+    "grimoire": "/home/ubuntu/Agent-Grimoire",
+}), encoding="utf-8")
+
+d = sh.discover_projects("cd ~/new-proj 干活", r5, home=fh)
+check("发现新git项目", d == {"new-proj": str(fh / "new-proj")})
+
+# 豁免表：裁决=登记，登记后不再发现
+(r5 / "workbench" / "ignore.json").write_text(json.dumps({"upstream-clone": "上游克隆，不开桌"}), encoding="utf-8")
+d2 = sh.discover_projects("在 ~/upstream-clone 和 ~/new-proj 都有活动", r5, home=fh)
+check("ignore.json豁免", d2 == {"new-proj": str(fh / "new-proj")})
+
+# 已登记项目（含BARE_NAMES别名）不算新
+d3 = sh.discover_projects("巡山 ~/Agent-Grimoire", r5, home=fh)
+check("已登记别名不算新", d3 == {})
+
+# 前缀吞噬修复：Portalk-latest 不再误中 portalk 桌
+check("前缀吞噬修复", sh.touched_projects(msgs("cd /home/ubuntu/Portalk-latest 看旧版"), r5) == set())
+
+# ~/短写法经 basename 映射命中桌
+check("~/短写法命中", sh.touched_projects(msgs("去 ~/Portalk/src 改代码"), r5) == {"portalk"})
+
+# 发现进 nudge 且账本去重：第一次报、落账后第二次静默
+n_d1 = sh.session_gap_nudge(msgs("cd ~/new-proj 干了一下午"), r5, now=NOW, home=fh)
+check("发现→nudge", n_d1 is not None and "new-proj" in n_d1)
+add_ledger(r5, [{"event": "spoor.session.gap", "ts": "2026-08-23T17:30:00", "new_projects": ["new-proj"]}])
+n_d2 = sh.session_gap_nudge(msgs("cd ~/new-proj 又干了一下午"), r5, now=NOW, home=fh)
+check("落账去重→静默", n_d2 is None)
+
+# 真实机器冒烟：本机已知桌的裸名/路径不应被当成新项目
+d_smoke = sh.discover_projects("cd ~/Stigmergy 和 ~/Agent-Grimoire 巡了一圈", Path.home() / "Stigmergy")
+check("真实冒烟:已知桌不是新项目", d_smoke == {})
+
+shutil.rmtree(fh)
+
 sys.exit(1 if FAIL else 0)
