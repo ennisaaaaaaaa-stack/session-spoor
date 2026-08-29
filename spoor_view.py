@@ -358,11 +358,21 @@ def _parse_status(path):
 
 
 def _load_repos():
-    # 桌名 → 仓库路径映射（声明式配置，每请求重读，改完不用重启）
+    # 桌名 → 仓库路径映射（声明式配置，每请求重读，改完不用重启）。
+    # v0.6 schema 放宽：值可为字符串（路径）或对象 {path?, aliases?}——
+    # 虚拟桌（无 path）没有 git 状态，直接不进 git 映射。
     try:
-        return json.loads(REPOS_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(REPOS_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
+    out = {}
+    for k, v in raw.items():
+        if isinstance(v, dict):
+            if v.get("path"):
+                out[k] = str(v["path"])
+        else:
+            out[k] = v
+    return out
 
 
 def _git(repo, *args):

@@ -7,7 +7,7 @@ MCP 返回层的 nudge（v0.4.1/0.4.2）只挂在工具返回上，工具不调�
 传感器就死。把检测搬到 on_session_end：壳层在 /new、/reset、CLI 退出、
 gateway 过期四种时刻喊一声，本模块做纯机械 diff——
 
-    messages 里出现的项目路径签名  −  账本里 journal.write 的项目集合
+    messages 里出现的项目引用  −  账本里 journal.write 的项目集合
     =  触达了但没落账的桌
 
 三条纪律继承自提案，一字不改：
@@ -16,22 +16,25 @@ gateway 过期四种时刻喊一声，本模块做纯机械 diff——
    的工具返回尾部浮现，不弹通知不占频道。
 3. 失败静默——任何异常返回 None，没有资格弄坏 on_session_end 主路径。
 
-设计注（2026-08-23，与甜心现场讨论）：
-- 路径签名从 workbench/repos.json 读——那是路径→桌的唯一事实源，
-  不在本模块里硬编码项目清单。
-- 只扫 user+assistant 消息文本（tool 结果是机器噪音，不扫）。
-- 时间锚：不依赖消息时间戳（壳层不一定提供），以检测时刻为"现在"，
-  账本倒序扫最近 SESSION_SCAN_LINES 行算每桌最后一次 journal.write。
-
-v0.5 普适发现（2026-08-29，甜心需求：任何新增项目随时会被同步到桌）：
-- 发现层与触达层共用同一把 token 提取器（~/名 与 /home/ubuntu/名）。
-- 文本里出现、目录有 .git、不在 repos.json 也不在 ignore.json 的
-  → 新项目候选，nudge 一次等裁决：真项目开桌+登记，上游克隆/副本
-  登记豁免。裁决的痕迹就在两张表里，表更新后提醒自然熄灭；
-  未裁决期间由日终兜底层（~/.hermes/scripts/spoor_backstop.py）低频再报。
-- 附带修复：路径签名带边界，/home/ubuntu/Portalk 不再误吞
-  /home/ubuntu/Portalk-latest（前缀吞噬 bug）；~/短写法经 basename
-  映射也能命中桌。
+v0.6 归一化管道（2026-08-29 晚，甜心架构问答后施工）：
+- 查找方向反转：正则只负责从文本「咬」名字 token（边界在咬的
+  那一口就定死），表负责认身份。v0.5 之前「拿路径去 find 文本」
+  的裸查找清零——前缀吞噬类 bug（Portalk 误吞 Portalk-latest）
+  从机制上绝种，不是修补。
+- 引用变体升一等公民：全路径 / ~/短写 / 裸名 / 别名（含中文）
+  全部折叠到同一身份索引（by_ref），对表只对身份。
+- repos.json schema 放宽：值可为字符串（路径，向后兼容）或对象
+  {path, aliases[], virtual}。裸名映射从代码（BARE_NAMES 硬编码，
+  v0.4-0.5 时代）搬进数据——"会变的都是数据，数据不住代码里"。
+- 虚拟桌：无路径、只有名字锚点的桌（架构设计/纯文档项目），
+  经 aliases 命中，git 状态自然为空。
+- 发现层三信号（甜心 8/29 需求：非代码任务/架构设计也要能进桌）：
+  ① .git 存在 → 强候选；② 目录存在 → 弱候选（非代码项目）；
+  系统目录/venv 后缀为编译期卫生常量（任何机器都成立的默认值），
+  与部署态裁决表 ignore.json 是两种东西。
+  ③ 宣言短语旗（"新项目/开坑/立项"等）——无路径时提示 agent 复核。
+- home 硬编码拆除：token 正则按运行时 home 现编（re.escape + 缓存），
+  开源部署第一天不再假设用户叫 ubuntu。
 """
 from __future__ import annotations
 
@@ -43,23 +46,72 @@ from pathlib import Path
 # 账本倒序扫描窗口（性能地板，与 spoor_common.NUDGE_SCAN_LINES 同哲学）
 SESSION_SCAN_LINES = 2000
 
-# home 一级名的字符集与提取器（触达层/发现层共用）。
-_NAME_CHARS = set(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
-)
-_PATH_TOKEN = re.compile(r"(?:/home/ubuntu|~)/([A-Za-z0-9][A-Za-z0-9._-]*)")
+# token 正则缓存：按 home 现编（re.escape），同 home 只编一次。
+_TOKEN_CACHE: dict = {}
 
-# 裸名签名表：不在 repos.json 的桌 + 对话里的裸短写（无路径前缀直呼其名）。
-# Agent-Grimoire=山海库（grimoire 桌）；Stigmergy 本体开发=memory-wash 桌
-# （自举：自己的出生自己记）。
-BARE_NAMES = {"Agent-Grimoire": "grimoire", "Stigmergy": "memory-wash"}
+# 系统目录（编译期卫生常量）：只放任何机器都成立的普适噪音——
+# OS 目录/包管理缓存/临时区/venv 后缀。部署者自己的目录不在这，
+# 经一次裁决进 ignore.json（那是部署态数据，这是机制内置默认）。
+_SYSTEM_DIRS = {
+    "Downloads", "downloads", "node_modules", "node-modules",
+    "go", "snap", "tmp", "temp", "backups",
+}
+_SYSTEM_SUFFIXES = ("-env", "-venv", "_env")
+
+# 宣言短语（发现信号③）：有宣言但没咬到任何路径 token 时打旗。
+_DECL_PATTERNS = re.compile(r"新项目|开了?个(?:新)?坑|立项|新仓库|新repo")
+
+
+def _token_re(home: Path) -> "re.Pattern":
+    key = str(home)
+    rx = _TOKEN_CACHE.get(key)
+    if rx is None:
+        rx = re.compile(r"(?:" + re.escape(key) + r"|~)/([\w.-]+)")
+        _TOKEN_CACHE[key] = rx
+    return rx
+
+
+# CJK 虚词边界集：中文没有词边界，「山海的三层门」的「的」是语法胶水
+# 不是名字部件——虚词当边界，其余 CJK 当名字部件（「山海经」的「经」
+# 挡住「山海」误中）。词表歧义（山海库 vs 山海经）归别名数据层管，
+# 不在边界语法里管——语法管形状，词汇管身份。
+_CJK_BOUNDARY = set("的了是在和与把被这就也都还而及对从到向以于为吗呢吧啊")
+
+
+def _is_head_break(ch: str) -> bool:
+    """左侧边界：只有 ASCII 名字字符会构成「更长名字」的前缀。"""
+    return not (ch.isascii() and (ch.isalnum() or ch in "._-"))
+
+
+def _is_tail_break(ch: str) -> bool:
+    """右侧边界：ASCII 名字字符挡（Portalk-latest）；CJK 只被虚词放行。"""
+    if ch.isascii():
+        return not (ch.isalnum() or ch in "._-")
+    return ch in _CJK_BOUNDARY
 
 
 def _load_projects(root: Path) -> dict:
-    """repos.json → {桌名: 绝对路径}。缺失/损坏返回空 dict（静默）。"""
+    """repos.json → 归一化 {桌: {"path": str|None, "aliases": set}}。
+
+    值兼容两种形态：字符串=路径（v0.5 及以前）；对象={path?, aliases?}。
+    path 的 basename 自动进 aliases（全路径与 ~/短写天然命中）。
+    缺失/损坏返回空 dict（静默纪律）。
+    """
     try:
         with open(root / "workbench" / "repos.json", encoding="utf-8") as f:
-            return {k: str(v) for k, v in json.load(f).items()}
+            raw = json.load(f)
+        out: dict = {}
+        for desk, v in raw.items():
+            if isinstance(v, dict):
+                path = str(v["path"]) if v.get("path") else None
+                aliases = {str(a) for a in v.get("aliases", []) or []}
+            else:
+                path, aliases = str(v), set()
+            if path:
+                aliases.add(Path(path).name)
+            aliases.discard(desk)
+            out[desk] = {"path": path, "aliases": aliases}
+        return out
     except Exception:
         return {}
 
@@ -75,56 +127,63 @@ def _load_ignore(root: Path) -> dict:
         return {}
 
 
-def _path_hit(path: str, text: str) -> bool:
-    """完整路径签名带右边界：/home/ubuntu/Portalk 不吞 Portalk-latest。"""
-    start = 0
-    while True:
-        i = text.find(path, start)
-        if i < 0:
-            return False
-        j = i + len(path)
-        if j >= len(text) or text[j] not in _NAME_CHARS:
-            return True
-        start = j
-
-
 def _word_hit(word: str, text: str) -> bool:
-    """裸词带双侧边界：xStigmergy 不算命中 Stigmergy。"""
+    """裸词带双侧边界（unicode 语义）：xStigmergy 不算命中 Stigmergy，
+    山海经 不算命中 山海；山海的三层门 算命中 山海（虚词当边界）。"""
     start = 0
     while True:
         i = text.find(word, start)
         if i < 0:
             return False
         j = i + len(word)
-        head_ok = i == 0 or text[i - 1] not in _NAME_CHARS
-        tail_ok = j >= len(text) or text[j] not in _NAME_CHARS
+        head_ok = i == 0 or _is_head_break(text[i - 1])
+        tail_ok = j >= len(text) or _is_tail_break(text[j])
         if head_ok and tail_ok:
             return True
         start = i + 1
 
 
-def discover_projects(text: str, root: Path, home: Path | None = None) -> dict:
-    """普适发现：文本里出现的 home 下一级目录，有 .git 但不在 repos.json
-    也不在豁免表的 → {目录名: 绝对路径}（新项目候选）。
+def _by_ref(projects: dict) -> dict:
+    """身份索引：名字/别名 → 桌（先到先得，同名歧义以表序为准）。"""
+    out: dict = {}
+    for desk, info in projects.items():
+        for a in info["aliases"]:
+            out.setdefault(a, desk)
+    return out
 
-    钩子不做开桌动作——只提醒，裁判是 agent（祖训第 1 条）。
+
+def discover_projects(text: str, root: Path, home: Path | None = None) -> dict:
+    """普适发现：文本里出现的 home 下一级目录，不在 repos.json /
+    ignore.json / 系统目录的 → {目录名: {"path": 绝对路径, "kind": "git"|"dir"}}。
+
+    kind=git（强候选：代码项目）/ dir（弱候选：目录存在但非 git——
+    非代码任务/资产/文档项目）。钩子不做开桌动作——只提醒，
+    裁判是 agent（祖训第 1 条）。
     """
     home = home or Path.home()
     if not text:
         return {}
     try:
         ignore = _load_ignore(root)
-        known_paths = {str(Path(v).resolve()) for v in _load_projects(root).values() if v}
-        known_names = set(BARE_NAMES)
+        known: set = set(ignore)
+        for desk, info in _load_projects(root).items():
+            known.add(desk)
+            known |= info["aliases"]
         out: dict = {}
-        for m in _PATH_TOKEN.finditer(text):
+        for m in _token_re(home).finditer(text):
             name = m.group(1)
-            if name in ignore or name in known_names:
+            if name in known or name in out:
+                continue
+            if name.startswith("."):
+                continue  # 隐藏目录（.cache/.config/…）一律不算候选
+            if name in _SYSTEM_DIRS or name.endswith(_SYSTEM_SUFFIXES):
                 continue
             p = home / name
             try:
-                if str(p.resolve()) not in known_paths and (p / ".git").exists():
-                    out[name] = str(p)
+                if (p / ".git").exists():
+                    out[name] = {"path": str(p), "kind": "git"}
+                elif p.is_dir():
+                    out[name] = {"path": str(p), "kind": "dir"}
             except OSError:
                 continue
         return out
@@ -174,30 +233,28 @@ def _messages_text(messages: list) -> str:
     return "\n".join(parts)
 
 
-def touched_projects(messages: list, root: Path) -> set:
-    """messages 文本里出现路径签名的桌集合。
+def touched_projects(messages: list, root: Path, home: Path | None = None) -> set:
+    """messages 文本里出现引用的桌集合。
 
-    签名三路：①完整路径（带右边界，不吞前缀同名目录）；
-    ②~/短写法（token 提取 → repos.json 路径 basename 映射，v0.5 起
-    与发现层共用同一把提取器）；③裸名（BARE_NAMES，双侧边界）。
+    v0.6 归一化：token 咬出的名字（全路径/~/短写同源）与裸词（别名，
+    含中文）都折叠到身份索引 by_ref 再对桌——原文千变万化，身份只有
+    一个。裸词命中过幽灵桌守卫（照照 8/23 审）：目标桌在本机
+    workbench/ 不存在时跳过——跨机器部署时提醒一张本地写不了的桌
+    是错误语义，不是降级。
     """
     text = _messages_text(messages)
     if not text:
         return set()
+    home = home or Path.home()
     out: set = set()
     projects = _load_projects(root)
-    for name, path in projects.items():
-        if path and _path_hit(path, text):
-            out.add(name)
-    by_basename = {Path(p).name: d for d, p in projects.items() if p}
-    for m in _PATH_TOKEN.finditer(text):
-        desk = by_basename.get(m.group(1))
+    by_ref = _by_ref(projects)
+    for m in _token_re(home).finditer(text):
+        desk = by_ref.get(m.group(1))
         if desk:
             out.add(desk)
-    # 幽灵桌守卫（照照 8/23 审）：目标桌在本机 workbench/ 不存在时跳过——
-    # 跨机器部署时提醒一张本地写不了的桌是错误语义，不是降级。
-    for bare, desk in BARE_NAMES.items():
-        if _word_hit(bare, text) and (root / "workbench" / desk).is_dir():
+    for name, desk in by_ref.items():
+        if _word_hit(name, text) and (root / "workbench" / desk).is_dir():
             out.add(desk)
     return out
 
@@ -235,21 +292,24 @@ def session_gap_nudge(
 ) -> "str | None":
     """session 末尾缺口检测。返回提醒文本或 None。
 
-    两类提醒：
+    三类提醒：
     1. 本次 session 触达、且 4h 内无 journal.write 的桌（4h 窗与
        NUDGE_AFTER_H 同源：弧线内不催，收口超期才提醒）。
-    2. 普适发现：未开桌的 git 项目——每个只提醒一次（账本去重），
-       裁决（登记两张表之一）后自然熄灭。
+    2. 普适发现：未登记的新目录——git 强候选/目录弱候选，每个只提醒
+       一次（账本 new_projects 去重），裁决（登记两张表之一）后熄灭。
+    3. 宣言旗：说了"新项目/开坑"但没咬到任何新目录——提示 agent
+       复核（可能是无目录的概念型项目，可登记虚拟桌）。
     """
     try:
         text = _messages_text(messages)
         if not text:
             return None
         now = now if now is not None else time.time()
+        home = home or Path.home()
         parts: list = []
         journaled = journaled_projects(root)
         gap: list = []
-        for p in sorted(touched_projects(messages, root)):
+        for p in sorted(touched_projects(messages, root, home)):
             ts = journaled.get(p)
             if ts is None:
                 gap.append(f"{p}(从未写)")
@@ -270,11 +330,21 @@ def session_gap_nudge(
         discovered = {k: v for k, v in discover_projects(text, root, home).items()
                       if k not in surfaced}
         if discovered:
-            names = "、".join(sorted(discovered))
+            names = "、".join(
+                f"{k}({'git' if v['kind'] == 'git' else '目录'})"
+                for k, v in sorted(discovered.items())
+            )
             parts.append(
-                f"[nudge] 发现未开桌的 git 项目：{names}。"
+                f"[nudge] 发现未登记的目录：{names}。"
                 "真项目→workbench_new 开桌+repos.json 登记；"
-                "上游克隆/副本→workbench/ignore.json 登记豁免。裁决一次即静默。"
+                "上游克隆/副本→workbench/ignore.json 登记豁免。"
+                "裁决一次即静默。"
+            )
+        if not discovered and not _token_re(home).search(text) and _DECL_PATTERNS.search(text):
+            parts.append(
+                "[nudge] 本 session 有新项目宣言但未识别到目录——若有：真项目开桌"
+                "+repos.json 登记；纯设计/文档类可登记虚拟桌（无 path，只填 aliases）；"
+                "无则忽略本条。"
             )
         if not parts:
             return None
