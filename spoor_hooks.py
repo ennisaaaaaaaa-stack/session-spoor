@@ -144,11 +144,19 @@ def _word_hit(word: str, text: str) -> bool:
 
 
 def _by_ref(projects: dict) -> dict:
-    """身份索引：名字/别名 → 桌（先到先得，同名歧义以表序为准）。"""
+    """身份索引：名字/别名 → 桌（先到先得，同名歧义以表序为准）。
+
+    桌名自身也是合法引用形态（v0.6 回归修复 2026-09-05）：裸名
+    「ocean-listen」在 BARE_NAMES 时代可命中，拆表进数据层时被
+    aliases.discard(desk) 连带丢弃——目录名恰等于桌名的桌连全路径
+    引用都失效。修复=桌名以最低优先级进索引（setdefault 放在
+    aliases 之后，同名歧义时显式别名优先）。
+    """
     out: dict = {}
     for desk, info in projects.items():
         for a in info["aliases"]:
             out.setdefault(a, desk)
+        out.setdefault(desk, desk)
     return out
 
 

@@ -26,7 +26,7 @@ Agent的session结束，过程就蒸发了。临时文件散在/tmp，进行中�
 
 共享一套mark词汇表（判断/数据/坑/待审·自/待审·人），同一本账本——**插件可拔，账本不可少。**
 
-> **涂鸦房没有任何定时器。** "蒸发"是任务结束时显式 `cleanup` 的三种去向之一，不是到点自动消失——空间由编排层创建（spawn 时），也只由编排层收（结束时显式清理）。已有两位独立读者从文档里读出了定时器（含 zcode 的"5分钟生命周期"误读），故此句明写。
+> **涂鸦房没有任何定时器。** "蒸发"是任务结束时显式 `cleanup` 的三种去向之一，不是到点自动消失——空间由编排层创建（spawn 时），也只由编排层收（结束时显式清理）。已有两位独立读者从文档里读出了定时器（含第二位独立测试者的"5分钟生命周期"误读），故此句明写。
 
 **mark词汇表是判断的分类学，不是文件的分类学：**
 
@@ -81,7 +81,7 @@ journal是读-改-写，ledger是追加——多进程同时写会交错。`spoo
 
 压测：8进程×20轮并发写，journal 160/160、ledger 160/160，零丢失。
 
-注意：锁层按平台分派——POSIX用`fcntl.flock`，Windows用`msvcrt.locking`（zcode PR）。**Windows多agent共享自本版起可用**：journal的读→拼→写在锁内串行。丢失更新实证（两进程并发`append_journal`各100条×5轮，屏障对齐首建竞态）：锁版200/200×5全对，修复前的裸写100–102/200——**静默丢半**。锁等待上限`LK_LOCK` 10次×1s，超时报错可重试，不静默裸写。已知过度互斥（沿POSIX旧语义不改）：锁名取文件名不含目录，不同project的同日journal互相排队——家庭规模无感。两个server在Windows上正常启动和单agent使用（v0.3.1修复：此前`import fcntl`在模块顶层直接炸，退化逻辑永远执行不到）。
+注意：锁层按平台分派——POSIX用`fcntl.flock`，Windows用`msvcrt.locking`（Windows contributor PR）。**Windows多agent共享自本版起可用**：journal的读→拼→写在锁内串行。丢失更新实证（两进程并发`append_journal`各100条×5轮，屏障对齐首建竞态）：锁版200/200×5全对，修复前的裸写100–102/200——**静默丢半**。锁等待上限`LK_LOCK` 10次×1s，超时报错可重试，不静默裸写。已知过度互斥（沿POSIX旧语义不改）：锁名取文件名不含目录，不同project的同日journal互相排队——家庭规模无感。两个server在Windows上正常启动和单agent使用（v0.3.1修复：此前`import fcntl`在模块顶层直接炸，退化逻辑永远执行不到）。
 
 ### 跨机器同步
 
@@ -124,7 +124,7 @@ archive_query(query="丝织业")                     # FTS 检索（记条数不
 
 - **version_id = sha256 前 12 位，内容寻址**：同一内容=同一版本（dedup 不 INSERT，但 put 事件照记账——账本记事件不记状态）。
 - **append-only**：档案不改不删，修复也是新版本——账本里永远看得到走过弯路。latest 是指针不是版本（现算，不落盘）。
-- **source_ref**（照照 round 7）：毕业路径归档填（涂鸦房导出→归档的账本链路），直归档不填。账本管发生过什么，source_ref 管"这两个事件是同一件事"。
+- **source_ref**（round 7 review）：毕业路径归档填（涂鸦房导出→归档的账本链路），直归档不填。账本管发生过什么，source_ref 管"这两个事件是同一件事"。
 - **记账纪律**：get/query 记账（内容进过模型上下文）；list 不记账（地址≠内容，总则不变量）；put 不记 entry_head（永久层，自毁条款第一次应用）。
 
 ### 为什么是trigram
@@ -183,6 +183,22 @@ STIGMERGY_ROOT=/tmp/spoor-test python tests/test_spoor_portable.py
 ```
 
 验收线是双平台绿：Linux（作者机）+ Windows（第二台CI，真机）各跑一遍，同一句话两边都过才算过。
+
+## 合并管道（tools/，2026-09 实战）
+
+两本账合成一本时的工具链——不是理论设计，是 A/B 两库真跑出来的：
+
+| 工具 | 干什么 |
+|---|---|
+| `renumber-ledger-ids.py` | 补号：给历史无 id 的行发 `<origin>-<UTC>-<seq>` 号（--apply 落盘）。**活库会长无号新行**（MCP 写入侧没有发号），归流/合并前必须先补——补号不是一次性迁移动作，是持续必要步骤 |
+| `spoor-merge-tool.py ledger` | 账本并集：按 id 双进双出，逐 id 逐字节相等才算过 |
+| `spoor-merge-tool.py desk` | 桌归并：两侧 workbench 同名项目做文件级 union，冲突版本都保留（右侧版本附 `.wsl-incomplete` 后缀），时区各认各的（`--left-tz +0800 --right-tz +0900`） |
+| `spoor-merge-tool.py reconcile` | 对账：并集守恒检查（条目数左右之和=合并后）、journal 条目守恒，出 JSON 报告 |
+| `detect-ledger-id-collision.py` | 发号撞车检测 |
+| `extract_causal.py` | 因果边提取：journal 里"因 A 事件而发生 B"显式叙述 → 边表（`--spoor` 指库根，只读） |
+| `build_increment_table.py` | 记忆增量表：从记忆 DB 快照（只读 mode=ro）算每条记忆最近一次被检索命中的时间，三态 cluster_status（ok/pending/outlier），`--db`/`--out` 参数化 |
+
+三段式用法：`renumber`（两边各补号）→ `ledger` 并集 → `desk` 桌归并 → `reconcile` 对账，全绿才切流。切流纪律：全量备份 → 活库换血 → 属主修正 → 切流事件本身进账本（生而带 id）。
 
 ## 设计立场
 
