@@ -138,11 +138,25 @@ def _with_lock(path: Path, write_fn):
 
 
 def append_ledger(event: dict, root: "Path | None" = None) -> None:
-    """带锁的 ledger 追加。具名住户自动盖 agent 字段。root 可覆盖（测试隔离）。"""
+    """带锁的 ledger 追加。具名住户自动盖 agent 字段。root 可覆盖（测试隔离）。
+
+    v0.7（A3，2026-09-06 照照）：写口改道。SPOOR_WRITE_URL 设了 → 事件走
+    HTTP 写口（本地 spool 兜底，spoor_http_client 同仓）；没设 → 原本地
+    追加，行为零变化。切流姿势：URL 配上即切，不切即回——config-gated，
+    双写期用它对账，对平后撤掉本地路径。
+
+    显式 root（测试隔离）永远走本地——测试不打网。生产钩子不传 root。
+    """
     event["ts"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
     n = agent_name()
     if n:
         event["agent"] = n
+
+    if root is None:
+        url = os.environ.get("SPOOR_WRITE_URL", "").strip()
+        if url:
+            _emit_to_write_api(event, url)
+            return
 
     ledger = (Path(root) / "ledger.jsonl") if root else LEDGER
 
@@ -151,6 +165,41 @@ def append_ledger(event: dict, root: "Path | None" = None) -> None:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     _with_lock(ledger, _do)
+
+
+# ── v0.7 写口改道（A3）───────────────────────────────────
+# 单进程单客户端：gateway 是钩子的唯一宿主，进程内缓存即可，不落盘不
+# 竞争。token 走 env（SPOOR_WRITE_TOKEN），不进代码不进 repo。
+# spool 文件在 STIGMERGY_ROOT 下（与账本同家）：写口在 VPS，断网/服务
+# 升级期间的事件在本地排队，恢复后 drain 冲走。
+_WRITE_CLIENT = None
+
+
+def _get_write_client(url: str):
+    global _WRITE_CLIENT
+    if _WRITE_CLIENT is None or _WRITE_CLIENT.url != url.rstrip("/"):
+        import spoor_http_client
+        _WRITE_CLIENT = spoor_http_client.SpoorWriteClient(
+            url=url,
+            token=os.environ.get("SPOOR_WRITE_TOKEN", ""),
+            spool_path=ROOT / "spool" / "ledger-events.jsonl",
+        )
+    return _WRITE_CLIENT
+
+
+def _emit_to_write_api(event: dict, url: str) -> None:
+    """事件经 spool → POST /append。失败静默（钩子纪律），事件已在盘上。"""
+    try:
+        c = _get_write_client(url)
+        c.emit(
+            type=str(event.get("event", "")),
+            actor=event.get("agent", ""),
+            room=os.environ.get("SPOOR_WRITE_ROOM", "gateway"),
+            payload=event,
+            origin=os.environ.get("SPOOR_WRITE_ORIGIN", "") or "wsl-gateway",
+        )
+    except Exception:
+        pass  # 盘都落不进：静默（on_session_end 纪律，无资格炸主路径）
 
 
 def append_journal(jf: Path, line: str) -> None:
