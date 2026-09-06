@@ -29,10 +29,15 @@ def mk_root():
     root = Path(tempfile.mkdtemp(prefix="spoor_hooks_test_"))
     (root / "workbench").mkdir()
     # 幽灵桌守卫（照照 8/23 审）后：BARE_NAMES 目标桌须真实存在才命中——
-    # 测试环境与生产同构，四张会被 BARE_NAMES 命中的桌目录要建出来。
+    # 测试环境与生产同构，会被 BARE_NAMES/裸词别名命中的桌目录要建出来。
+    # 8/31 照照补：tideline/orbi 也建——v0.6 后裸词路径过守卫，且消息文本
+    # 硬编码 /home/ubuntu/... 在非 ubuntu home 的第二机器上 token 咬不中、
+    # 退到裸词别名（basename "tideline-memory"/"orbi-repo"），目录缺则 FAIL。
     (root / "workbench" / "portalk").mkdir()
     (root / "workbench" / "memory-wash").mkdir()
     (root / "workbench" / "grimoire").mkdir()
+    (root / "workbench" / "tideline").mkdir()
+    (root / "workbench" / "orbi").mkdir()
     (root / "workbench" / "repos.json").write_text(json.dumps({
         "portalk": "/home/ubuntu/Portalk",
         "tideline": "/home/ubuntu/tideline-memory",
