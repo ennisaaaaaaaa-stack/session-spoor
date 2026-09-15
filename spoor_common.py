@@ -18,6 +18,7 @@ SPOOR_LOCK_*: 跨进程文件锁。fcntl.flock 在同一文件描述符上
 """
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -137,6 +138,66 @@ def _with_lock(path: Path, write_fn):
     return write_fn(path)
 
 
+# ── v1.3 出生发号（2026-09-15 洄，甜心开窗批准）──────────────────
+# 动机：v0.7 归流暴露的「增长型无号」——补号是事后救火，autofill/钩子每天
+# 继续写无号新行，合并工具门闸拒收。根治=发号进写入路径：id 生而带。
+# 族谱：与 renumber-ledger-ids.py 同格式 <origin>-<UTC秒>-<序号>，
+# merge/detect 工具零改动即认。
+_ORIGIN_DEFAULT = "local"
+
+
+def _origin(root: "Path | None" = None) -> str:
+    """本机发号方标识。$STIGMERGY_ROOT/origin 文件（每台机器写自己的，
+    gitignored，同 agent.name 惯例）；缺省 local——未配置机器仍出生带号，
+    但跨机归流前应显式写（本家两值：vps / wsl，与 merge 工具口径一致）。"""
+    base = Path(root) if root else ROOT
+    try:
+        v = (base / "origin").read_text(encoding="utf-8").strip().lower()[:16]
+        if v:
+            return v
+    except (OSError, ValueError):
+        pass
+    return _ORIGIN_DEFAULT
+
+
+def _last_ledger_id(ledger: Path) -> "str | None":
+    """锁内读账本尾部最后一条带 id 的行。只看末 8KB（性能地板：账本无上限）。
+    窗口内截断的半行 json 解析失败自然跳过，无害。"""
+    try:
+        with open(ledger, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 8192))
+            chunk = f.read().decode("utf-8", "replace")
+        for line in reversed(chunk.splitlines()):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            rid = row.get("id")
+            if rid:
+                return str(rid)
+        return None
+    except OSError:
+        return None
+
+
+def _next_event_id(last_id: "str | None", origin: str) -> str:
+    """v1.3 发号：id = <origin>-<UTC秒>-<序号>。序号在 append_ledger 的
+    flock 锁内从尾行接力——所有写口共用同一把锁，同源同秒跨进程唯一。
+    尾行无 id（补号前存量）或秒不同 → 序号从 001 起；历史补号 id 的秒
+    是过去时刻，与新写不撞。"""
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    seq = 1
+    if last_id:
+        m = re.match(r"^(.*)-(\d{3})$", last_id)
+        if m and m.group(1) == f"{origin}-{stamp}":
+            seq = int(m.group(2)) + 1
+    return f"{origin}-{stamp}-{seq:03d}"
+
+
 def append_ledger(event: dict, root: "Path | None" = None) -> None:
     """带锁的 ledger 追加。具名住户自动盖 agent 字段。root 可覆盖（测试隔离）。
 
@@ -144,6 +205,11 @@ def append_ledger(event: dict, root: "Path | None" = None) -> None:
     HTTP 写口（本地 spool 兜底，spoor_http_client 同仓）；没设 → 原本地
     追加，行为零变化。切流姿势：URL 配上即切，不切即回——config-gated，
     双写期用它对账，对平后撤掉本地路径。
+
+    v1.3（2026-09-15 洄）：出生发号。本地分支在锁内发号（setdefault——
+    调用方自带 id 则尊重，切流事件先例）；HTTP 分支不在客户端发号：权威
+    账本在服务端，id 应在服务端落账那一刻出生（A3 服务端若不走本函数
+    落账，需在其落账点补发号——挂账给照照审）。
 
     显式 root（测试隔离）永远走本地——测试不打网。生产钩子不传 root。
     """
@@ -161,6 +227,8 @@ def append_ledger(event: dict, root: "Path | None" = None) -> None:
     ledger = (Path(root) / "ledger.jsonl") if root else LEDGER
 
     def _do(p: Path) -> None:
+        # v1.3：锁内发号——读尾接力与追加在同一临界区，跨进程同秒不撞
+        event.setdefault("id", _next_event_id(_last_ledger_id(p), _origin(root)))
         with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
