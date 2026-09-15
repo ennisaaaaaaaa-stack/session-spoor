@@ -75,6 +75,10 @@ SPOOR_AGENT=hui STIGMERGY_ROOT=~/spoor workbench_server.py
 - **完全自定义**：任何UTF-8字符串，不存在写死的名单。fork这个仓库的陌生人set自己的名字即可署名，无需改任何代码
 - **不设=匿名**：行为与单住户版逐字节一致，已有部署零迁移成本
 
+### 发号方：`origin` 文件（v1.3）
+
+每台写账本的机器必写 `{STIGMERGY_ROOT}/origin`（gitignored，同 `agent.name` 惯例）——内容一行机器标识，本家值域 `vps` / `wsl`（与 merge 工具口径一致）。缺省 `local`：未配置机器仍出生带号，但两台机器都缺省时会共用 `local-` 前缀，跨机归流被门闸拒收（照照 9/15 审稿火力③：WSL root 实测缺此文件）。**部署清单：新机器装好后、开任何写口之前，先写 origin。**
+
 ### 并发安全：文件锁
 
 journal是读-改-写，ledger是追加——多进程同时写会交错。`spoor_common.py`用`fcntl.flock`把整个写事务包进排它锁，锁文件落`{root}/.locks/`（gitignore）。

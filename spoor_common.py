@@ -143,6 +143,10 @@ def _with_lock(path: Path, write_fn):
 # 继续写无号新行，合并工具门闸拒收。根治=发号进写入路径：id 生而带。
 # 族谱：与 renumber-ledger-ids.py 同格式 <origin>-<UTC秒>-<序号>，
 # merge/detect 工具零改动即认。
+# v1.3.1（2026-09-15 洄，照照审稿火力①②）：接力失明即兜底——尾行形状
+# 不认（A3 混形状库）/ 窗口被大行截断读不到号 / 尾行无号，都不再静默
+# 从 001 起，而是全库扫「本源本秒」已用最大序号 +1。正则放宽到 \d{3,}
+# （原 \d{3} 在序号到 1000 时接力断裂，同根撞号）。
 _ORIGIN_DEFAULT = "local"
 
 
@@ -160,9 +164,18 @@ def _origin(root: "Path | None" = None) -> str:
     return _ORIGIN_DEFAULT
 
 
+def _now_stamp() -> str:
+    """当前 UTC 秒戳。独立小函数：测试注入固定秒用（同秒场景不必等表）。"""
+    return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+
+
 def _last_ledger_id(ledger: Path) -> "str | None":
-    """锁内读账本尾部最后一条带 id 的行。只看末 8KB（性能地板：账本无上限）。
-    窗口内截断的半行 json 解析失败自然跳过，无害。"""
+    """锁内读账本尾部窗口（末 8KB）里最后一条带 id 的行。
+
+    v1.3.1 勘误（照照批评收下）：原注释「性能地板：账本无上限」口径作废——
+    8KB 窗口只是接力**快路径**的优化，不是唯一性的边界条件。行长无上界
+    约束时窗口是可能失明的（一整条 >8KB 大行垫底 → 窗口内没有完整行），
+    失明时唯一性由 _mint_event_id 的全库扫描兜底，窗口本身不承诺安全。"""
     try:
         with open(ledger, "rb") as f:
             f.seek(0, os.SEEK_END)
@@ -184,17 +197,47 @@ def _last_ledger_id(ledger: Path) -> "str | None":
         return None
 
 
-def _next_event_id(last_id: "str | None", origin: str) -> str:
-    """v1.3 发号：id = <origin>-<UTC秒>-<序号>。序号在 append_ledger 的
-    flock 锁内从尾行接力——所有写口共用同一把锁，同源同秒跨进程唯一。
-    尾行无 id（补号前存量）或秒不同 → 序号从 001 起；历史补号 id 的秒
-    是过去时刻，与新写不撞。"""
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    seq = 1
-    if last_id:
-        m = re.match(r"^(.*)-(\d{3})$", last_id)
+def _scan_max_seq(ledger: Path, origin: str, stamp: str) -> int:
+    """全库扫描「本源本秒」已用的最大序号（0 = 本秒没写过）。锁内调用，
+    无并发顾虑；代价一次全文件顺序读，只在快路径失明时发生——常态尾部
+    接力零额外 IO。混形状库（A3 的 origin-unix秒-pid-seq / 历史无号行 /
+    补号存量）按 origin-stamp 精确前缀过滤，异形状天然跳过。"""
+    pat = re.compile(rf"^{re.escape(origin)}-{re.escape(stamp)}-(\d{{3,}})$")
+    best = 0
+    try:
+        with open(ledger, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                rid = row.get("id")
+                if rid:
+                    m = pat.match(str(rid))
+                    if m:
+                        best = max(best, int(m.group(1)))
+    except OSError:
+        pass
+    return best
+
+
+def _mint_event_id(ledger: Path, origin: str) -> str:
+    """v1.3 发号（锁内调用）：id = <origin>-<UTC秒>-<序号>。
+
+    快路径：尾行是「本源本秒」v1.3 号 → 序号接力 +1（group(1) 与
+    origin-stamp 全等比对，A3 形状即使尾段恰好三位数也不会被误吞）。
+    兜底路径（v1.3.1）：尾行无号 / 形状不认 / 窗口失明 → 全库扫本秒
+    已用最大序号 +1，绝不静默回 001。秒不同 → 本秒无号 → 001 起步；
+    历史补号 id 的秒是过去时刻，与新写不撞。"""
+    stamp = _now_stamp()
+    last = _last_ledger_id(ledger)
+    seq = None
+    if last:
+        m = re.match(r"^(.*)-(\d{3,})$", last)
         if m and m.group(1) == f"{origin}-{stamp}":
             seq = int(m.group(2)) + 1
+    if seq is None:
+        seq = _scan_max_seq(ledger, origin, stamp) + 1
     return f"{origin}-{stamp}-{seq:03d}"
 
 
@@ -228,7 +271,8 @@ def append_ledger(event: dict, root: "Path | None" = None) -> None:
 
     def _do(p: Path) -> None:
         # v1.3：锁内发号——读尾接力与追加在同一临界区，跨进程同秒不撞
-        event.setdefault("id", _next_event_id(_last_ledger_id(p), _origin(root)))
+        # v1.3.1：接力失明（尾行无号/形状不认/大行垫底）→ 全库同秒扫描兜底
+        event.setdefault("id", _mint_event_id(p, _origin(root)))
         with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
