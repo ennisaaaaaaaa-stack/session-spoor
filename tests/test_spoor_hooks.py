@@ -171,9 +171,17 @@ add_ledger(r5, [{"event": "spoor.session.gap", "ts": "2026-08-23T17:30:00", "new
 n_d2 = sh.session_gap_nudge(msgs("cd ~/new-proj 又干了一下午"), r5, now=NOW, home=fh)
 check("落账去重→静默", n_d2 is None)
 
-# 真实机器冒烟：本机已知桌的裸名/路径不应被当成新项目
-d_smoke = sh.discover_projects("cd ~/Stigmergy 和 ~/Agent-Grimoire 巡了一圈", Path.home() / "Stigmergy")
-check("真实冒烟:已知桌不是新项目", d_smoke == {})
+# 真实机器冒烟：只在 VPS 布局上跑。已知桌身份来自本地 repos.json
+# （gitignored，不进 git）——「Stigmergy」经 memory-wash 桌 path 的
+# basename 自动进 aliases。第二台机器（WSL/Win clone）没有本地
+# repos.json，~/Stigmergy 空目录会被当 weak candidate 捞出——
+# 那是环境差不是回归（鸣鸣 9/20 hooks 42/43 的挂条）。
+if (Path.home() / "Stigmergy" / "workbench" / "repos.json").exists() \
+        and (Path.home() / "Agent-Grimoire").is_dir():
+    d_smoke = sh.discover_projects("cd ~/Stigmergy 和 ~/Agent-Grimoire 巡了一圈", Path.home() / "Stigmergy")
+    check("真实冒烟:已知桌不是新项目", d_smoke == {})
+else:
+    print("  skip 真实冒烟（非 VPS 布局：本地 repos.json 或 Agent-Grimoire 不在）")
 
 shutil.rmtree(fh)
 

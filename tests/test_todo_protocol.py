@@ -75,6 +75,14 @@ def t_parser():
     r7 = sc.parse_next_steps("# S\n\n## 下一步\n- T1 [洄] 只有标题\n")
     check("incomplete no source", r7["items"][0]["complete"] is False)
 
+    # 平标签混排（鸣鸣审稿发现#2 的回归断言）：老式「下一步：」独占行 +
+    # 平标签「卡在哪：」——段截止到平标签，不把后段吞进 malformed。
+    r8 = sc.parse_next_steps(
+        "# S\n\n下一步：\n- T1 [洄] a ｜x｜判据：y\n卡在哪：无\n")
+    check("flat-label boundary items", len(r8["items"]) == 1
+          and r8["items"][0]["id"] == "T1", str(r8["items"]))
+    check("flat-label no malformed", r8["malformed"] == [], str(r8["malformed"]))
+
 
 def t_receipts():
     check("ok receipt", sc.todo_receipt_ids("✅T12 判据达成") == {"T12"})
@@ -110,10 +118,69 @@ def t_orphan_invariant():
         check("orphan cured", ((seen | disk2) - disk2 - rcpt2) == set())
 
 
+DOC_PLAIN = """# STATUS · 更新于 2026-09-20 03:00
+
+## 做到哪
+x
+
+## 下一步
+- T1 [洄] a ｜x｜判据：y
+"""
+
+
+def t_view_tristate():
+    """桥端三态（鸣鸣 v0.9 审稿发现#1 的回归断言）。
+
+    同桌 fixture 分两态钉死，别只钉一头：
+    - _sc 正常 + STATUS 缺席      → todo_parsed 键整体不在
+    - _sc 正常 + STATUS 在场无段  → section_found=false、键在
+    第三态（_sc=None，残缺部署）用 monkeypatch 钉：键也不在。
+    """
+    import spoor_view as sv
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        desk = root / "proj"
+        desk.mkdir()
+        # _sc 正常 + STATUS 缺席 → 键整体不在
+        p1 = sv._project(desk)
+        check("absent: no key", "todo_parsed" not in p1, str(p1.get("todo_parsed")))
+
+        # _sc 正常 + STATUS 在场无下一步段 → 键在、section_found=false
+        (desk / "STATUS.md").write_text("# S\n\n## 做到哪\nn\n", encoding="utf-8")
+        p2 = sv._project(desk)
+        tp = p2.get("todo_parsed")
+        check("no-section: key present", "todo_parsed" in p2)
+        check("no-section: section_found=false",
+              isinstance(tp, dict) and tp.get("section_found") is False, str(tp))
+
+        # 有段 → 键在、解析出条目
+        (desk / "STATUS.md").write_text(DOC_PLAIN, encoding="utf-8")
+        p3 = sv._project(desk)
+        tp3 = p3.get("todo_parsed")
+        check("parsed: items out", isinstance(tp3, dict)
+              and [i["id"] for i in tp3["items"]] == ["T1"], str(tp3))
+
+    # _sc=None（残缺部署）→ 键不在（monkeypatch，测完还原）
+    saved = sv._sc
+    try:
+        sv._sc = None
+        with tempfile.TemporaryDirectory() as td:
+            desk = Path(td) / "proj2"
+            desk.mkdir()
+            (desk / "STATUS.md").write_text(DOC_PLAIN, encoding="utf-8")
+            p4 = sv._project(desk)
+            check("degraded: no key", "todo_parsed" not in p4,
+                  str(p4.get("todo_parsed")))
+    finally:
+        sv._sc = saved
+
+
 def main():
     t_parser()
     t_receipts()
     t_orphan_invariant()
+    t_view_tristate()
     n = len(FAILS)
     print(f"\n{'ALL PASS' if not n else f'{n} FAIL'}")
     sys.exit(1 if n else 0)

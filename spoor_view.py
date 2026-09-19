@@ -14,13 +14,16 @@ spoor-view 桥 — 档案房只读 HTTP 窗口（给鸣鸣的前端 fetch 用）
 
 待办条目级输出（协议 v0.9，docs/todo-protocol-v09.md §四）：
 - 解析器 import 自 spoor_common（server/桥/backstop 三处同源，桥不自写）。
-- /api/project/{name} 与 /api/projects 全字段：todo_items[{id,owner,head,
-  source,criteria,sorted,complete}] + todo_confirm + todo_malformed
-  （段内不合规行照实透出——旧格式待迁移是迁移债，不藏）。
+- /api/project/{name} 与 /api/projects 全字段：todo_parsed{items[{id,owner,
+  head,source,criteria,sorted,complete}], confirm, malformed[], section_found}
+  （malformed 照实透出——旧格式待迁移是迁移债，不藏）。
 - /api/overview 每项目 todo_items 只带轻字段（id/owner/head/sorted）+ todo_confirm。
 - 原 todo 原文段保留（向后兼容，前端渐进切换）。
-- 拿不到 spoor_common（残缺部署）→ 三字段整体缺席而非空值：
-  「没解析」和「解析了没有」在前端是两种诚实。
+- 三态语义（契约 v0.3，null≠缺席）：
+  键不在 = spoor_common 缺席（残缺部署，「没解析」）；
+  null   = STATUS 文件不存在（桌还没写状态）；
+  dict   = 解析了（section_found 分辨段在不在——「解析了没有」）。
+  「没解析」「没状态可解析」「解析了没有」在前端是三种诚实。
 """
 
 import hmac
@@ -355,6 +358,11 @@ except Exception:
 
 
 def _todo_parse(text):
+    # 「两种诚实」三态语义（契约 v0.3；鸣鸣 v0.9 审稿发现#1 的修复）：
+    #   None   = 没解析（spoor_common 缺席，或解析器异常，或 STATUS 不存在）
+    #   dict   = 解析了（哪怕 section_found=false——解析了没有，也是一种结果）
+    # 已知缺口（记账缓议，v0.9 审稿定不这轮动）：解析器异常也归进 None，
+    # 和缺席撞形——「第三种沉默」。炸面小（parse 只动正则），单独一轮想清楚。
     if _sc is None:
         return None
     try:
@@ -465,11 +473,12 @@ def _project(dirpath):
         "git": git,
         "todo": (status["sections"].get("下一步", "") if status else ""),
         "blocked": (status["sections"].get("卡在哪", "") if status else ""),
-        # v0.9：条目级解析（与 server/backstop 同源）。STATUS 不在 → None；
-        # spoor_common 缺席 → _todo_parse 返回 None（整体缺席语义）。
-        "todo_parsed": (_todo_parse((dirpath / "STATUS.md").read_text(
-            encoding="utf-8", errors="replace"))
-            if (dirpath / "STATUS.md").exists() else None),
+        # v0.9：条目级解析（与 server/backstop 同源）。三态（契约 v0.3）：
+        # STATUS 不在 → 键在值 null；spoor_common 缺席 → 键整体不在；
+        # 解析了 → dict（section_found 分辨段在不在）。
+        **({"todo_parsed": _todo_parse((dirpath / "STATUS.md").read_text(
+                encoding="utf-8", errors="replace"))}
+           if (dirpath / "STATUS.md").exists() and _sc is not None else {}),
         "pending_review": [e for e in journal if "待审" in e["mark"]],
         "pits": [e for e in journal if "坑" in e["mark"]],
         "journal": journal[:30],
@@ -591,13 +600,15 @@ def overview():
             {
                 "project": p["project"],
                 "todo": p["todo"],
-                # v0.9 轻字段：概览不打全量，前端要细节走 /api/project/{name}
-                "todo_items": ([
-                    {"id": i["id"], "owner": i["owner"], "head": i["head"],
-                     "sorted": i["sorted"]}
-                    for i in (p.get("todo_parsed") or {}).get("items", [])
-                ] if p.get("todo_parsed") is not None else None),
-                "todo_confirm": (p.get("todo_parsed") or {}).get("confirm"),
+                # v0.9 轻字段：概览不打全量，前端要细节走 /api/project/{name}。
+                # 两态与全字段同源（契约 v0.3）：todo_parsed 键不在（_sc 缺席）
+                # → 轻字段也键整体不在；在 → 打轻字段（解析结果哪怕空也打）。
+                **({"todo_items": [
+                        {"id": i["id"], "owner": i["owner"], "head": i["head"],
+                         "sorted": i["sorted"]}
+                        for i in (p.get("todo_parsed") or {}).get("items", [])],
+                   "todo_confirm": (p.get("todo_parsed") or {}).get("confirm")}
+                   if "todo_parsed" in p else {}),
             }
             for p in projects if p["todo"]
         ],

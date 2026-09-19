@@ -347,7 +347,12 @@ def _nextstep_section(text: str) -> "str | None":
     m = re.search(r"(?m)^#{0,3}\s*下一步\s*[：:]?\s*$", text)
     if m:
         rest = text[m.end():]
-        m2 = re.search(r"(?m)^#{1,6}\s+\S", rest)
+        # 段落截止：下一个 markdown 标题，或老式平标签行（做到哪/卡在哪）——
+        # 与 spoor_view._parse_status 的段落边界对齐。否则平标签混排文档里
+        # 「下一步：」独占行会把「卡在哪：无」整段吞进 section 逐行进
+        # malformed（鸣鸣 v0.9 审稿发现#2）。
+        m2 = re.search(
+            r"(?m)^(?:#{1,6}\s+\S|(?:做到哪|卡在哪)(?:\s*[：:]|\s*$))", rest)
         return rest[:m2.start()] if m2 else rest
     m = re.search(r"(?m)^下一步\s*[：:]\s*(.+)$", text)
     if m:
