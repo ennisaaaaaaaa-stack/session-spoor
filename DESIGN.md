@@ -96,7 +96,10 @@ scratchpad_cleanup(space_id, mode=export_all|export_marked|discard)
 ```
 workbench_new(project, description)              # 建项目：目录+description+INDEX登记
 workbench_status(project, text?)                 # 读/写 STATUS.md（不传text=读，传=写）
+                                                 # v0.9: 写时落 threesome.status.write 账本事件
+                                                 #（todos_before/after id 集——出账审计数据源）
 workbench_journal(project, entry, mark?)         # 追加记录条（自动时间戳）
+                                                 # v0.9: 待办出账收据 = ✅T<id>/↩T<id> 前缀条目
 workbench_read_journal(project, mark?, limit?)   # 按类型读记录（开工先读"坑"）
 workbench_snippet(project, name, content)        # 存复用件
 workbench_get_snippet(project, name)             # 取复用件
