@@ -124,16 +124,28 @@ def workbench_status(project: str, text: str = "") -> str:
     """读/写 STATUS.md —— 进行中状态桌面。
     不传text=读当前状态（下次session醒来先读这个）；
     传text=覆盖写入（保持最新，写"做到哪/下一步/卡在哪"）。
-    待办约定（v0.2）：「下一步」里的条目标注归属（谁的事谁打头，人名或agent名），
-    办完即从「下一步」移除——已办历史由journal条目流承接，STATUS只留还没做的。"""
+    待办协议 v0.9（docs/todo-protocol-v09.md）：「下一步」条目格式
+    `- T<id> [归属] 标题 ｜出处｜判据：…`，段头盖确认线
+    `> 排序确认：日期（甜心）·确认至第N条`。办完出账必须先在 journal 落
+    ✅T<id>/↩T<id> 收据再删行（backstop 抓无收据孤儿）。"""
     p = _proj(project)
     f = p / "STATUS.md"
     if not text:
         body = f.read_text(encoding="utf-8") if f.exists() else "(no status yet)"
         return spoor_common.nudge_text(body)  # v0.4.1: 状态查询是高频动作，nudge 搭车
+    # v0.9：写前后的待办 id 集落账本——出账审计的数据源（只带 id 不带正文，
+    # 与 journal entry_head 同泄漏哲学）
+    before = spoor_common.parse_next_steps(
+        f.read_text(encoding="utf-8") if f.exists() else "")
     f.write_text(f"# STATUS · 更新于 {_now()}\n\n{text}\n", encoding="utf-8")
+    after = spoor_common.parse_next_steps(f.read_text(encoding="utf-8"))
+    _ledger({"event": "threesome.status.write", "project": project,
+             "todos_before": [i["id"] for i in before["items"]],
+             "todos_after": [i["id"] for i in after["items"]],
+             "malformed_after": len(after["malformed"])})
     _index_write()
-    return json.dumps({"ok": True, "written": len(text)})
+    return json.dumps({"ok": True, "written": len(text),
+                       "todos_after": [i["id"] for i in after["items"]]})
 
 @mcp.tool()
 def workbench_journal(project: str, entry: str, mark: str = "判断") -> str:

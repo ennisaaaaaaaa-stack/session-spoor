@@ -11,6 +11,16 @@ spoor-view 桥 — 档案房只读 HTTP 窗口（给鸣鸣的前端 fetch 用）
 
 运行：~/Stigmergy/venv/bin/python ~/Stigmergy/spoor_view.py
 地址：http://127.0.0.1:8765 （只绑 127.0.0.1）
+
+待办条目级输出（协议 v0.9，docs/todo-protocol-v09.md §四）：
+- 解析器 import 自 spoor_common（server/桥/backstop 三处同源，桥不自写）。
+- /api/project/{name} 与 /api/projects 全字段：todo_items[{id,owner,head,
+  source,criteria,sorted,complete}] + todo_confirm + todo_malformed
+  （段内不合规行照实透出——旧格式待迁移是迁移债，不藏）。
+- /api/overview 每项目 todo_items 只带轻字段（id/owner/head/sorted）+ todo_confirm。
+- 原 todo 原文段保留（向后兼容，前端渐进切换）。
+- 拿不到 spoor_common（残缺部署）→ 三字段整体缺席而非空值：
+  「没解析」和「解析了没有」在前端是两种诚实。
 """
 
 import hmac
@@ -20,6 +30,7 @@ import re
 import secrets
 import sqlite3
 import subprocess
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -334,6 +345,24 @@ def _parse_frontmatter(text):
     return fm
 
 
+# v0.9 待办解析：与 server/backstop 同源（spoor_common），桥不自写。
+# 拿不到 spoor_common（残缺部署）→ 三字段整体缺席而非空值——
+# 「没解析」和「解析了没有」在前端是两种诚实（pins schema 漂移案的纪律）。
+try:
+    import spoor_common as _sc
+except Exception:
+    _sc = None
+
+
+def _todo_parse(text):
+    if _sc is None:
+        return None
+    try:
+        return _sc.parse_next_steps(text)
+    except Exception:
+        return None
+
+
 def _parse_status(path):
     if not path.exists():
         return None
@@ -436,6 +465,11 @@ def _project(dirpath):
         "git": git,
         "todo": (status["sections"].get("下一步", "") if status else ""),
         "blocked": (status["sections"].get("卡在哪", "") if status else ""),
+        # v0.9：条目级解析（与 server/backstop 同源）。STATUS 不在 → None；
+        # spoor_common 缺席 → _todo_parse 返回 None（整体缺席语义）。
+        "todo_parsed": (_todo_parse((dirpath / "STATUS.md").read_text(
+            encoding="utf-8", errors="replace"))
+            if (dirpath / "STATUS.md").exists() else None),
         "pending_review": [e for e in journal if "待审" in e["mark"]],
         "pits": [e for e in journal if "坑" in e["mark"]],
         "journal": journal[:30],
@@ -554,7 +588,17 @@ def overview():
             {k: v for k, v in p.items() if k != "journal"} for p in projects
         ],
         "todos": [
-            {"project": p["project"], "todo": p["todo"]}
+            {
+                "project": p["project"],
+                "todo": p["todo"],
+                # v0.9 轻字段：概览不打全量，前端要细节走 /api/project/{name}
+                "todo_items": ([
+                    {"id": i["id"], "owner": i["owner"], "head": i["head"],
+                     "sorted": i["sorted"]}
+                    for i in (p.get("todo_parsed") or {}).get("items", [])
+                ] if p.get("todo_parsed") is not None else None),
+                "todo_confirm": (p.get("todo_parsed") or {}).get("confirm"),
+            }
             for p in projects if p["todo"]
         ],
         "pending_review": [

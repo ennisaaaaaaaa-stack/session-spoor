@@ -59,7 +59,8 @@ frontmatter 缺失或字段缺失 → 默认 `lifecycle: 生长`、`ecosystem: "
 ## API 形状（冻结现状，v0.1 只加不改）
 
 - `GET /api/overview` → `{server_time, projects[], todos[], pending_review[], recent_events[], archive_docs, push_queue[], needs_attention[]}`
-- `GET /api/projects` → `[{project, description, status{updated, priority, sections{}}, git{}, todo, blocked, pending_review[], pits[], journal[], journal_total}]` + **v0.1 每项 `lifecycle, ecosystem, relates_to[]`（来自 frontmatter）** + **v0.2 新增 `milestones[], docs[]`**
+  - v0.3（待办协议 v0.9，2026-09-19）：`todos[]` 每项扩展 `todo_items[{id,owner,head,sorted}]` + `todo_confirm{date,by,count}|null`（轻字段；细节走 `/api/project/{name}` 的 `todo_parsed` 全字段）。`spoor_common` 缺席时三字段整体缺席（null≠缺席）。
+- `GET /api/projects` → `[{project, description, status{updated, priority, sections{}}, git{}, todo, blocked, pending_review[], pits[], journal[], journal_total}]` + **v0.1 每项 `lifecycle, ecosystem, relates_to[]`（来自 frontmatter）** + **v0.2 新增 `milestones[], docs[]`** + **v0.3 新增 `todo_parsed{items[{id,owner,head,source,criteria,sorted,complete}], confirm, malformed[], section_found}`（STATUS 不存在为 null）**
 - `GET /api/project/<name>` → 同上单项目
 - `GET /api/graph` → `{nodes[{doc, version_id, parent, bytes, source_ref}], edges[]}`
 - `GET /api/archive` → `{docs[]}`

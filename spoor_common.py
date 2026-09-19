@@ -327,6 +327,82 @@ def append_journal(jf: Path, line: str) -> None:
     _with_lock(jf, _do)
 
 
+# ---- v0.9 待办协议：共用「下一步」解析器（server/桥/backstop 三处同源）----
+# 协议全文 docs/todo-protocol-v09.md。条目格式：
+#   - T12 [洄] 标题 ｜出处｜判据：验收判据
+# 确认线：> 排序确认：YYYY-MM-DD（甜心）·确认至第N条  → 前N条=已排序
+# 出账收据（journal 里）：✅T12 …（判据达成）/ ↩T13 …（退回待审）
+
+_TODO_CONFIRM_RE = re.compile(
+    r"^>\s*排序确认[：:]\s*(\d{4}-\d{2}-\d{2})\s*[（(]([^）)]+)[）)]\s*[·•]?\s*确认至第\s*(\d+)\s*条")
+_TODO_ITEM_RE = re.compile(r"^-\s*(T\d+)\s*\[([^\]\n]+)\]\s*(.+)$")
+_TODO_SEP_RE = re.compile(r"[｜|]")
+_TODO_RECEIPT_RE = re.compile(r"[✅↩]\s*(T\d+)")
+
+
+def _nextstep_section(text: str) -> "str | None":
+    """从 STATUS 正文里挖「下一步」段。两种形态：
+    标题式（## 下一步 独占一行，段落到下一个标题为止）；
+    行内式（下一步：内容 单行，老格式）。找不到返回 None。"""
+    m = re.search(r"(?m)^#{0,3}\s*下一步\s*[：:]?\s*$", text)
+    if m:
+        rest = text[m.end():]
+        m2 = re.search(r"(?m)^#{1,6}\s+\S", rest)
+        return rest[:m2.start()] if m2 else rest
+    m = re.search(r"(?m)^下一步\s*[：:]\s*(.+)$", text)
+    if m:
+        return m.group(1)
+    return None
+
+
+def parse_next_steps(text: str) -> dict:
+    """解析「下一步」段。返回：
+    {section_found, confirm: {date,by,count}|None,
+     items: [{id,owner,head,source,criteria,sorted,complete}],
+     malformed: [不合规行]}
+    sorted=在确认线内；complete=出处+判据齐（四件套的机器面）。"""
+    sec = _nextstep_section(text)
+    if sec is None:
+        return {"section_found": False, "confirm": None, "items": [], "malformed": []}
+    confirm = None
+    items = []
+    malformed = []
+    for ln in sec.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        if s.startswith(">"):
+            m = _TODO_CONFIRM_RE.match(s)
+            if m:
+                confirm = {"date": m.group(1), "by": m.group(2).strip(),
+                           "count": int(m.group(3))}
+            continue  # 其他引用行（含旧确认线被新线替换的过渡态）忽略
+        m = _TODO_ITEM_RE.match(s)
+        if m:
+            tid, owner, rest = m.group(1), m.group(2).strip(), m.group(3).strip()
+            parts = [p.strip() for p in _TODO_SEP_RE.split(rest)]
+            head = parts[0]
+            source = parts[1] if len(parts) > 1 else ""
+            crit = "｜".join(parts[2:]) if len(parts) > 2 else ""
+            if re.match(r"^判据\s*[：:]", crit):
+                crit = re.split(r"[：:]", crit, 1)[1].strip()
+            items.append({"id": tid, "owner": owner, "head": head,
+                          "source": source, "criteria": crit})
+            continue
+        malformed.append(s)
+    n = confirm["count"] if confirm else 0
+    for i, it in enumerate(items):
+        it["sorted"] = i < n
+        it["complete"] = bool(it["source"] and it["criteria"])
+    return {"section_found": True, "confirm": confirm, "items": items,
+            "malformed": malformed}
+
+
+def todo_receipt_ids(journal_text: str) -> set:
+    """从 journal 文本里收出账收据的 id 集（✅/↩ 标记）。"""
+    return set(m.group(1) for m in _TODO_RECEIPT_RE.finditer(journal_text))
+
+
 # ---- v0.4.1 nudge：journal 久未写的搭车提醒 ----
 # 动机：写入纪律在熟悉的 runtime（常驻 skill+SOUL）里靠自觉成立，
 # 陌生 runtime（kimi code 等）没这层文化，journal 静默断流。
@@ -344,7 +420,9 @@ NUDGE_SCAN_LINES = 500   # 账本只倒序扫这么多行（性能地板，老�
 def _nudge_text(age_h) -> str:
     head = "workbench journal 从未写过" if age_h is None else f"workbench journal 已 {age_h:.0f}h 未写"
     return (f"[nudge] {head}。收工前 workbench_journal 留一条"
-            f"（mark: 坑/判断/数据，一句话即可）——journal 是下个 session 的交接凭据。")
+            f"（mark: 坑/判断/数据，一句话即可）——journal 是下个 session 的交接凭据。"
+            f"顺手对一眼 STATUS 的「下一步」：新长出来的活落条目（v0.9 格式），"
+            f"办完的先落 ✅/↩ 收据再删行。")
 
 
 # ---- v0.4.2 跨项目 nudge：钩子只提醒，裁判是 agent ----
