@@ -337,22 +337,24 @@ _TODO_CONFIRM_RE = re.compile(
     r"^>\s*排序确认[：:]\s*(\d{4}-\d{2}-\d{2})\s*[（(]([^）)]+)[）)]\s*[·•]?\s*确认至第\s*(\d+)\s*条")
 _TODO_ITEM_RE = re.compile(r"^-\s*(T\d+)\s*\[([^\]\n]+)\]\s*(.+)$")
 _TODO_SEP_RE = re.compile(r"[｜|]")
-_TODO_RECEIPT_RE = re.compile(r"[✅↩]\s*(T\d+)")
+_TODO_RECEIPT_RE = re.compile(r"[✅↩]\ufe0f?\s*(T\d+)")  # \ufe0f?=VS16（无名发现③）
 
 
-def _nextstep_section(text: str) -> "str | None":
+def _nextstep_section(text: str):
     """从 STATUS 正文里挖「下一步」段。两种形态：
-    标题式（## 下一步 独占一行，段落到下一个标题为止）；
-    行内式（下一步：内容 单行，老格式）。找不到返回 None。"""
-    m = re.search(r"(?m)^#{0,3}\s*下一步\s*[：:]?\s*$", text)
+    标题式（## 下一步 独占一行，段落到下一个标题为止；标题可带尾文
+    「## 下一步（迁移中）」、可无空格「##下一步」——老桌真实写法，
+    无名 v0.9 审稿发现①）；行内式（下一步：内容 单行，老格式）。
+    找不到返回 None。"""
+    m = re.search(r"(?m)^(?:#{1,6}[ \t]*下一步[^\n]*|下一步[ \t]*[：:]?[ \t]*)$", text)
     if m:
         rest = text[m.end():]
-        # 段落截止：下一个 markdown 标题，或老式平标签行（做到哪/卡在哪）——
-        # 与 spoor_view._parse_status 的段落边界对齐。否则平标签混排文档里
-        # 「下一步：」独占行会把「卡在哪：无」整段吞进 section 逐行进
-        # malformed（鸣鸣 v0.9 审稿发现#2）。
+        # 段落截止：下一个 markdown 标题（含无空格写法 ##卡在哪），
+        # 或老式平标签行（做到哪/卡在哪）——与 spoor_view._parse_status
+        # 的段落边界对齐。否则平标签/无空格标题混排文档会把后段吞进
+        # section 逐行进 malformed（鸣鸣#2、无名①，同根两刀）。
         m2 = re.search(
-            r"(?m)^(?:#{1,6}\s+\S|(?:做到哪|卡在哪)(?:\s*[：:]|\s*$))", rest)
+            r"(?m)^(?:#{1,6}[ \t]*\S|(?:做到哪|卡在哪)(?:\s*[：:]|\s*$))", rest)
         return rest[:m2.start()] if m2 else rest
     m = re.search(r"(?m)^下一步\s*[：:]\s*(.+)$", text)
     if m:
@@ -385,6 +387,11 @@ def parse_next_steps(text: str) -> dict:
         m = _TODO_ITEM_RE.match(s)
         if m:
             tid, owner, rest = m.group(1), m.group(2).strip(), m.group(3).strip()
+            if not owner:
+                # 空归属=四件套缺第1件（无名 v0.9 审稿发现②）——协议§一：
+                # 缺一不进待办。落 malformed 照实透出，人侧走待审流。
+                malformed.append(s)
+                continue
             parts = [p.strip() for p in _TODO_SEP_RE.split(rest)]
             head = parts[0]
             source = parts[1] if len(parts) > 1 else ""

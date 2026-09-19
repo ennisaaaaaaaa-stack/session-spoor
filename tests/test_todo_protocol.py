@@ -83,9 +83,30 @@ def t_parser():
           and r8["items"][0]["id"] == "T1", str(r8["items"]))
     check("flat-label no malformed", r8["malformed"] == [], str(r8["malformed"]))
 
+    # 无空格标题（无名发现①）：##卡在哪 闭段；## 下一步（迁移中） 开段。
+    r9 = sc.parse_next_steps(
+        "# S\n\n## 下一步\n- T1 [洄] a ｜x｜判据：y\n\n##卡在哪\n不卡\n")
+    check("no-space close items", len(r9["items"]) == 1
+          and r9["items"][0]["id"] == "T1", str(r9["items"]))
+    check("no-space close no malformed", r9["malformed"] == [], str(r9["malformed"]))
+    r10 = sc.parse_next_steps(
+        "## 下一步（迁移中）\n- T2 [洄] b ｜x｜判据：y\n")
+    check("titled-suffix open parsed", r10["section_found"] is True
+          and len(r10["items"]) == 1 and r10["items"][0]["id"] == "T2",
+          str(r10))
+
+    # 空归属（无名发现②）：四件套缺第1件 → malformed 不进 items。
+    r11 = sc.parse_next_steps(
+        "## 下一步\n- T1 [ ] a ｜x｜判据：y\n")
+    check("empty-owner malformed", r11["items"] == []
+          and r11["malformed"] == ["- T1 [ ] a ｜x｜判据：y"], str(r11))
+
 
 def t_receipts():
     check("ok receipt", sc.todo_receipt_ids("✅T12 判据达成") == {"T12"})
+    # VS16 变体（无名发现③）：✅️=U+2705+U+FE0F，手机输入法/跨端粘贴常见。
+    check("VS16 check receipt", sc.todo_receipt_ids("✅️T12 干完了") == {"T12"})
+    check("VS16 return receipt", sc.todo_receipt_ids("↩️T13 退回待审") == {"T13"})
     check("return receipt", sc.todo_receipt_ids("↩T13 退回待审") == {"T13"})
     check("bare id no receipt", sc.todo_receipt_ids("T12 裸提不算") == set())
     check("multi", sc.todo_receipt_ids("先 ✅T1 后 ✅T2，还有↩T3") == {"T1", "T2", "T3"})
