@@ -132,6 +132,17 @@ def workbench_status(project: str, text: str = "") -> str:
     f = p / "STATUS.md"
     if not text:
         body = f.read_text(encoding="utf-8") if f.exists() else "(no status yet)"
+        # facts 表 v1.0（J2）：冷启动读 STATUS 时顺路带回该项目域+全局域的
+        # 已探明事实——开工仪式搭车，不新建仪式（nudge 同哲学）。
+        # 零事实不带空行（高频读路径不加噪声）；失败静默：结论层没有
+        # 资格弄坏状态桌的读取。
+        try:
+            if facts_store is not None:
+                fr = facts_store.fact_read(project, reason="冷启动搭车")
+                if fr["rows"] or fr["expired"]:
+                    body += "\n\n" + fr["text"]
+        except Exception:
+            pass
         return spoor_common.nudge_text(body)  # v0.4.1: 状态查询是高频动作，nudge 搭车
     # v0.9：写前后的待办 id 集落账本——出账审计的数据源（只带 id 不带正文，
     # 与 journal entry_head 同泄漏哲学）
@@ -334,6 +345,56 @@ def workbench_reindex() -> str:
     """全量重建检索索引。schema 变更或怀疑索引脏时用。日常搜索自动增量，无需手动调。"""
     r = spoor_search.update_index(force=True)
     return json.dumps(r, ensure_ascii=False)
+
+
+# ── facts 表 v1.0（spec v2，tiexin 10/5 裁定；纯逻辑在 facts_store.py，两宅共用）──
+
+try:
+    import facts_store
+except Exception:   # facts_store 缺席时优雅降级（同 sensory 模块纪律）
+    facts_store = None
+
+
+def _facts():
+    if facts_store is None:
+        raise RuntimeError("facts_store unavailable")
+    return facts_store
+
+
+@mcp.tool()
+def fact_write(scope: str, key: str, conclusion: str, source: str,
+               ttl_class: str = "fast", ttl_h: float = 0.0) -> str:
+    """写口：分身收工时落一条已探明事实（冷启动免考古的结论层）。
+
+    什么算「值得入表的事实」由写者判断：重探一次要花真金白银的、
+    结论跨牌面成立的，才值得占一行。同 (scope,key) 再写=刷新。
+
+    Args:
+        scope: 'global'（全局）/ 'face:<指纹>'（牌面域）/ 项目名（须已 workbench_new）
+        key: 事实主题键，短标识串（如 env-event-queue-empty）
+        conclusion: 一句话人话结论（冷启动直接读这行省掉重探）
+        source: 出处指针——journal:<project>/<date> / ledger:<id> / commit:<sha>
+        ttl_class: fast(6h,「现在时」事实：队列空/在跑进程) / slow(720h,「地质」事实：路径不存在/表结构)
+        ttl_h: >0 时覆盖分型默认
+    """
+    return spoor_common.nudge_json(_facts().fact_write(
+        scope, key, conclusion, source, ttl_class=ttl_class, ttl_h=ttl_h))
+
+
+@mcp.tool()
+def fact_read(scope: str = "", include_expired: bool = False, reason: str = "") -> str:
+    """读口：冷启动/派活侧拉取已探明事实（「上游已探明：X，别再探」的数据源）。
+
+    默认只回未过期——过期即从活视图消失=逼重探（新鲜度优先于省钱），
+    过期名单在返回尾部出声提醒待重验。
+
+    Args:
+        scope: 空/global=只回全局域；项目名或 face:* = 全局域+该域
+        include_expired: 审计/回挖用——过期行也带全字段进 rows
+        reason: 触发来源（如 "冷启动"/"派活"），进账本供审计
+    """
+    return spoor_common.nudge_json(_facts().fact_read(
+        scope, include_expired=include_expired, reason=reason))
 
 
 # 统一错误契约：包装所有已注册工具

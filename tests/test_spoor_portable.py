@@ -171,7 +171,7 @@ async def workbench_suite():
         async with ClientSession(r, w) as s:
             await s.initialize()
             lt = await s.list_tools()
-            check("workbench tools listed", len(lt.tools) == 10, str([t.name for t in lt.tools]))
+            check("workbench tools listed", len(lt.tools) == 12, str([t.name for t in lt.tools]))
 
             n1 = json.loads(await call(s, "workbench_new", project="stigmergy", description="agent过程管理系统"))
             check("new ok", n1.get("ok"), n1)
@@ -660,7 +660,7 @@ async def windows_sim_suite():
             await s.initialize()
             lt = await s.list_tools()
             check("[v0.3.1][win-sim] workbench server starts without fcntl",
-                  len(lt.tools) == 10, str([t.name for t in lt.tools]))
+                  len(lt.tools) == 12, str([t.name for t in lt.tools]))
             # journal写入走 _with_lock 退化路径（fcntl=None → 裸写）必须成功
             wj = json.loads(await call(s, "workbench_journal", project="stigmergy",
                                        entry="Windows模拟下锁层退化裸写成功", mark="数据"))

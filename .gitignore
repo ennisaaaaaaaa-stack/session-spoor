@@ -13,3 +13,6 @@ archive/
 bridge.log
 agent.name
 origin
+facts.db
+facts.db-wal
+facts.db-shm

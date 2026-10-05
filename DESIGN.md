@@ -105,6 +105,10 @@ workbench_snippet(project, name, content)        # 存复用件
 workbench_get_snippet(project, name)             # 取复用件
 workbench_list() -> projects[]                   # 项目索引（工具层可见）
 workbench_complete(project)                      # 打完成勾，等消化cron处理
+fact_write(scope, key, conclusion, source,       # facts 表 v1.0：已探明事实落表
+           ttl_class?, ttl_h?)                   # 同(scope,key)再写=刷新(UPSERT)
+fact_read(scope?, include_expired?, reason?)     # 读已探明事实；默认只回未过期，
+                                                 # 过期名单出声逼重验（J4/J7）
 ```
 
 ### 档案房（zhaozhao草案）

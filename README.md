@@ -113,6 +113,17 @@ workbench_search(query="表结构", project="portalk")    # 单项目内搜
 
 索引对象：journal每条记录（行级，带mark/agent解析）、snippet、design、STATUS、description、scratch文本文件。增量维护——按`(path, mtime)`记忆，变更才重扫，搜索时自动更新，无需手动reindex。
 
+## facts 表（v1.0 新增——已探明事实，冷启动免考古）
+
+便宜的结论层：重探一次要花真金白银的、结论跨牌面成立的，收工时 `fact_write` 落一行；下个 session 冷启动（读 STATUS 时自动携带）直接拿到结论+出处指针，不再重烧。TTL 分型 fast(6h)/slow(720h)，过期即从活视图消失并在读口出声逼重验。设计边界与 faceHash 裁决见 `docs/facts-table.md`。
+
+```
+fact_write(scope="pianist-ops", key="env-event-queue-empty",
+           conclusion="env-event 队列空", source="ledger:vps-...", ttl_class="fast")
+fact_read(scope="pianist-ops")          # 全局域+项目域活事实；过期名单出声
+workbench_status(project)               # 冷启动搭车：读 STATUS 自动带回 facts
+```
+
 ## 档案房（v0.4新增——契约 v0.2 已实现）
 
 版本化永久归档，五工具面：`archive_put` / `archive_get` / `archive_list` / `archive_link` / `archive_query`。
